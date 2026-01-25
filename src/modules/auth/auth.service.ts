@@ -1,0 +1,280 @@
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { AccountsService } from '../accounts/accounts.service';
+import * as bcrypt from 'bcrypt';
+import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { AccountRefreshToken, AppType } from '../accounts/entities/account-refresh-token.entity';
+import { Repository, MoreThan, IsNull } from 'typeorm';
+import { MailService } from '../mail/mail.service';
+import { AccountOtp } from '../accounts/entities/account-otp.entity';
+import { AccountStatus } from '../accounts/entities/account.entity';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly accountsService: AccountsService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    @InjectRepository(AccountRefreshToken)
+    private readonly refreshTokenRepository: Repository<AccountRefreshToken>,
+    @InjectRepository(AccountOtp)
+    private readonly otpRepository: Repository<AccountOtp>,
+    private readonly mailService: MailService,
+  ) {}
+
+  async validateUser(email: string, pass: string): Promise<any> {
+    const user = await this.accountsService.findByEmail(email);
+    if (user && (await bcrypt.compare(pass, user.passwordHash))) {
+      const { passwordHash, ...result } = user;
+      return result;
+    }
+    return null;
+  }
+
+  async login(user: any, appType: AppType = AppType.OWNER_APP) {
+    if (user.status === 'unverified') {
+      throw new UnauthorizedException('Tài khoản chưa được xác thực. Vui lòng kiểm tra email.');
+    }
+
+    const payload = { email: user.email, sub: user.id };
+    
+    const accessToken = this.jwtService.sign(payload);
+    const refreshTokenValue = this.jwtService.sign(payload, {
+      secret: this.configService.get('JWT_REFRESH_SECRET'),
+      expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN'),
+    });
+
+    // Save refresh token to DB (hashed)
+    const refreshTokenHash = await bcrypt.hash(refreshTokenValue, 10);
+    const refreshTokenEntity = this.refreshTokenRepository.create({
+      accountId: user.id,
+      tokenHash: refreshTokenHash,
+      appType,
+      issuedAt: new Date(),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days matching .env
+    });
+    await this.refreshTokenRepository.save(refreshTokenEntity);
+
+    const { passwordHash, ...cleanUser } = user;
+
+    return {
+      access_token: accessToken,
+      refresh_token: refreshTokenValue,
+      user: cleanUser,
+    };
+  }
+
+  async register(data: any) {
+    try {
+      const user = await this.accountsService.create(data);
+      
+      // Generate 6-digit OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      const otpEntity = this.otpRepository.create({
+        accountId: user.id,
+        otp: otpCode,
+        type: 'REGISTER',
+        expiresAt,
+      });
+      await this.otpRepository.save(otpEntity);
+
+      // Send email
+      try {
+        await this.mailService.sendVerificationCode(user.email, user.fullName, otpCode);
+        return {
+          message: 'Đăng ký thành công. Vui lòng kiểm tra email để nhận mã xác thực.',
+          email: user.email,
+        };
+      } catch (error) {
+        console.error('Failed to send email:', error);
+        return {
+          message: 'Đăng ký thành công, nhưng không thể gửi email xác thực. Bạn có thể kiểm tra mã OTP trong database.',
+          email: user.email,
+          otp_debug: otpCode, // Chỉ dùng lúc dev để bạn có mã xác thực luôn
+        };
+      }
+    } catch (error) {
+      if (error.status === 409) {
+        throw error;
+      }
+      throw new UnauthorizedException('Không thể đăng ký tài khoản. Vui lòng thử lại.');
+    }
+  }
+
+  async verifyOtp(email: string, otp: string , type: 'register' | 'forgot-password' = 'register') {
+    const user = await this.accountsService.findByEmail(email);
+    if (!user) {
+      throw new UnauthorizedException('Không tìm thấy tài khoản.');
+    }
+
+    const formattedType = type === 'register' ? 'REGISTER' : 'FORGOT_PASSWORD';
+    const otpRecord = await this.otpRepository.findOne({
+      where: {
+        accountId: user.id,
+        otp,
+        type: formattedType,
+        isUsed: false,
+        expiresAt: MoreThan(new Date()),
+      },
+    });
+
+    if (!otpRecord) {
+      throw new UnauthorizedException('Mã OTP không chính xác hoặc đã hết hạn.');
+    }
+
+    // Đánh dấu mã đã dùng
+    otpRecord.isUsed = true;
+    await this.otpRepository.save(otpRecord);
+
+    // Kích hoạt tài khoản (nếu đang ở luồng đăng ký và tài khoản chưa kích hoạt)
+    if (formattedType === 'REGISTER' && user.status === AccountStatus.UNVERIFIED) {
+        user.status = AccountStatus.ACTIVE;
+        await this.accountsService.update(user.id, { status: AccountStatus.ACTIVE });
+        return this.login(user); // Đăng ký xong thì login luôn cho tiện
+    }
+
+    return {
+      message: "Xác thực thành công. Bây giờ bạn có thể đặt lại mật khẩu mới if cần."
+    }
+  }
+
+  async resendOtp(email: string, type: 'register' | 'forgot-password' = 'register') {
+    const user = await this.accountsService.findByEmail(email);
+    if (!user) {
+      throw new UnauthorizedException('Không tìm thấy tài khoản.');
+    }
+
+    if (type === 'register' && user.status === AccountStatus.ACTIVE) {
+      return { message: 'Tài khoản đã được xác thực trước đó.' };
+    }
+
+    // Vô hiệu hóa các OTP cũ của loại này
+    await this.otpRepository.update(
+      { accountId: user.id, type: type === 'register' ? 'REGISTER' : 'FORGOT_PASSWORD', isUsed: false },
+      { isUsed: true }
+    );
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    const otpEntity = this.otpRepository.create({
+      accountId: user.id,
+      otp: otpCode,
+      expiresAt,
+      type: type === 'register' ? 'REGISTER' : 'FORGOT_PASSWORD',
+    });
+    await this.otpRepository.save(otpEntity);
+
+    try {
+      if (type === 'register') {
+        await this.mailService.sendVerificationCode(user.email, user.fullName, otpCode);
+      } else {
+        await this.mailService.sendPasswordResetOtp(user.email, user.fullName, otpCode);
+      }
+      return { message: 'Mã OTP mới đã được gửi.', email: user.email };
+    } catch (error) {
+      return { message: 'Lỗi gửi mail.', email: user.email, otp_debug: otpCode };
+    }
+  }
+
+  async forgotPassword(email: string) {
+    const user = await this.accountsService.findByEmail(email);
+    if (!user) throw new UnauthorizedException('Không tìm thấy tài khoản.');
+
+    // Vô hiệu hóa các OTP cũ cho luồng quên mật khẩu
+    await this.otpRepository.update(
+      { accountId: user.id, type: 'FORGOT_PASSWORD', isUsed: false },
+      { isUsed: true }
+    );
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    const otpEntity = this.otpRepository.create({
+      accountId: user.id,
+      otp: otpCode,
+      expiresAt,
+      type: 'FORGOT_PASSWORD',
+    });
+    await this.otpRepository.save(otpEntity);
+
+    await this.mailService.sendPasswordResetOtp(user.email, user.fullName, otpCode);
+    return { message: 'Mã OTP đặt lại mật khẩu đã được gửi.', email: user.email };
+  }
+
+  async resetPassword(email: string, newPassword: string) {
+    const user = await this.accountsService.findByEmail(email);
+    if (!user) throw new UnauthorizedException('Không tìm thấy tài khoản.');
+
+    // KIỂM TRA BẢO MẬT: Phải có ít nhất 1 OTP "FORGOT_PASSWORD" đã được verify (isUsed=true)
+    // trong vòng 15 phút gần nhất để chứng minh bước verify-otp đã thực sự diễn ra.
+    const lastVerification = await this.otpRepository.findOne({
+        where: {
+            accountId: user.id,
+            type: 'FORGOT_PASSWORD',
+            isUsed: true,
+            updatedAt: MoreThan(new Date(Date.now() - 15 * 60 * 1000))
+        },
+        order: { updatedAt: 'DESC' }
+    });
+
+    if (!lastVerification) {
+        throw new UnauthorizedException('Yêu cầu chưa được xác thực hoặc mã đã hết hạn. Vui lòng verify OTP lại.');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await this.accountsService.update(user.id, { passwordHash: hashedPassword });
+
+    return { message: 'Mật khẩu đã được đặt lại thành công.' };
+  }
+
+  async refreshToken(refreshToken: string, appType: AppType = AppType.OWNER_APP) {
+    try {
+      const payload = this.jwtService.verify(refreshToken, {
+        secret: this.configService.get('JWT_REFRESH_SECRET'),
+      });
+
+      const accountId = payload.sub;
+
+      // Find valid refresh tokens for this account
+      const tokens = await this.refreshTokenRepository.find({
+        where: {
+          accountId,
+          appType,
+          revokedAt: IsNull(),
+          expiresAt: MoreThan(new Date()),
+        },
+      });
+
+      // Find the one that matches our hash
+      let matchedTokenEntity: AccountRefreshToken | null = null;
+      for (const tokenEntity of tokens) {
+        const isMatch = await bcrypt.compare(refreshToken, tokenEntity.tokenHash);
+        if (isMatch) {
+          matchedTokenEntity = tokenEntity;
+          break;
+        }
+      }
+
+      if (!matchedTokenEntity) {
+        throw new UnauthorizedException('Refresh token is invalid or has been revoked');
+      }
+
+      // Revoke the old token (Token Rotation)
+      matchedTokenEntity.revokedAt = new Date();
+      await this.refreshTokenRepository.save(matchedTokenEntity);
+
+      // Get user data
+      const user = await this.accountsService.findById(accountId);
+      if (!user) throw new UnauthorizedException('User no longer exists');
+
+      // Generate new pair
+      return this.login(user, appType);
+    } catch (e) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+  }
+}
