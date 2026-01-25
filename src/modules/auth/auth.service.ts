@@ -69,6 +69,12 @@ export class AuthService {
     try {
       const user = await this.accountsService.create(data);
       
+      // Invalidate any existing OTPs for SAFETY (though unlikely for new user, prevents edge cases)
+      await this.otpRepository.update(
+        { accountId: user.id, type: 'REGISTER', isUsed: false },
+        { isUsed: true }
+      );
+
       // Generate 6-digit OTP
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
@@ -119,6 +125,7 @@ export class AuthService {
         isUsed: false,
         expiresAt: MoreThan(new Date()),
       },
+      order: { createdAt: 'DESC' }, // Prefer the newest one
     });
 
     if (!otpRecord) {
