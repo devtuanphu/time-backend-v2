@@ -59,6 +59,10 @@ export class ExpoPushService {
     body: string;
     data?: Record<string, any>;
   }): Promise<void> {
+    this.logger.log(`📤 Sending push to ${tokens.length} device(s)...`);
+    this.logger.log(`Tokens: ${JSON.stringify(tokens)}`);
+    this.logger.log(`Notification: ${JSON.stringify(notification)}`);
+
     const messages: PushMessage[] = tokens.map(token => ({
       to: token,
       title: notification.title,
@@ -72,7 +76,8 @@ export class ExpoPushService {
       const batch = messages.slice(i, i + 100);
       
       try {
-        await fetch(this.EXPO_PUSH_URL, {
+        this.logger.log(`Sending batch ${i / 100 + 1}...`);
+        const response = await fetch(this.EXPO_PUSH_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -80,8 +85,22 @@ export class ExpoPushService {
           },
           body: JSON.stringify(batch),
         });
+
+        const result = await response.json();
+        this.logger.log(`✅ Expo response: ${JSON.stringify(result)}`);
+
+        // Check for errors in tickets
+        if (result.data) {
+          result.data.forEach((ticket: any, index: number) => {
+            if (ticket.status === 'error') {
+              this.logger.error(`❌ Push failed for token ${tokens[index]}: ${ticket.message}`);
+            } else {
+              this.logger.log(`✅ Push sent successfully: ${ticket.id}`);
+            }
+          });
+        }
       } catch (error) {
-        this.logger.error(`Batch ${i / 100 + 1} failed:`, error);
+        this.logger.error(`❌ Batch ${i / 100 + 1} failed:`, error);
       }
     }
   }
