@@ -6,11 +6,20 @@ import { EmployeeProfile } from './employee-profile.entity';
 
 // --- ENUMS ---
 
+// Loại chu kỳ ca làm việc
+export enum CycleType {
+  DAILY = 'DAILY',           // Theo ngày
+  WEEKLY = 'WEEKLY',         // Theo tuần
+  MONTHLY = 'MONTHLY',       // Theo tháng
+  INDEFINITE = 'INDEFINITE', // Vô thời hạn
+}
+
+// Trạng thái chu kỳ
 export enum WorkCycleStatus {
-  DRAFT = 'DRAFT',
-  OPEN = 'OPEN',
-  PUBLISHED = 'PUBLISHED',
-  CLOSED = 'CLOSED',
+  DRAFT = 'DRAFT',       // Nháp
+  ACTIVE = 'ACTIVE',     // Đang hoạt động
+  STOPPED = 'STOPPED',   // Đã dừng thủ công
+  EXPIRED = 'EXPIRED',   // Đã hết hạn tự nhiên
 }
 
 export enum ShiftAssignmentStatus {
@@ -24,6 +33,17 @@ export enum ShiftSwapStatus {
   PENDING = 'PENDING',
   APPROVED = 'APPROVED',
   REJECTED = 'REJECTED',
+}
+
+// Ngày trong tuần (cho lịch mẫu)
+export enum WeekDaySchedule {
+  MONDAY = 'MONDAY',
+  TUESDAY = 'TUESDAY',
+  WEDNESDAY = 'WEDNESDAY',
+  THURSDAY = 'THURSDAY',
+  FRIDAY = 'FRIDAY',
+  SATURDAY = 'SATURDAY',
+  SUNDAY = 'SUNDAY',
 }
 
 // --- ENTITIES ---
@@ -40,11 +60,18 @@ export class WorkCycle extends BaseEntity {
   @Column()
   name: string;
 
+  @Column({
+    name: 'cycle_type',
+    type: 'enum',
+    enum: CycleType,
+  })
+  cycleType: CycleType;
+
   @Column({ name: 'start_date', type: 'date' })
   startDate: string;
 
-  @Column({ name: 'end_date', type: 'date' })
-  endDate: string;
+  @Column({ name: 'end_date', type: 'date', nullable: true })
+  endDate: string | null; // null cho INDEFINITE
 
   @Column({ name: 'registration_deadline', type: 'timestamp', nullable: true })
   registrationDeadline: Date;
@@ -56,8 +83,45 @@ export class WorkCycle extends BaseEntity {
   })
   status: WorkCycleStatus;
 
+  @Column({ name: 'stopped_at', type: 'timestamp', nullable: true })
+  stoppedAt: Date | null;
+
+  @Column({ name: 'scheduled_stop_at', type: 'timestamp', nullable: true })
+  scheduledStopAt: Date | null;
+
   @OneToMany(() => ShiftSlot, (slot) => slot.cycle)
   slots: ShiftSlot[];
+
+  @OneToMany(() => CycleShiftTemplate, (template) => template.cycle)
+  templates: CycleShiftTemplate[];
+}
+
+// Lịch mẫu cho chu kỳ Vô thời hạn
+@Entity('cycle_shift_templates')
+export class CycleShiftTemplate extends BaseEntity {
+  @Column({ name: 'cycle_id' })
+  cycleId: string;
+
+  @ManyToOne(() => WorkCycle, (cycle) => cycle.templates, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'cycle_id' })
+  cycle: WorkCycle;
+
+  @Column({ name: 'work_shift_id' })
+  workShiftId: string;
+
+  @ManyToOne(() => WorkShift, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'work_shift_id' })
+  workShift: WorkShift;
+
+  @Column({
+    name: 'day_of_week',
+    type: 'enum',
+    enum: WeekDaySchedule,
+  })
+  dayOfWeek: WeekDaySchedule;
+
+  @Column({ name: 'max_staff', type: 'int', default: 1 })
+  maxStaff: number;
 }
 
 @Entity('shift_slots')

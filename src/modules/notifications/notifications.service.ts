@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification } from './entities/notification.entity';
 import { Account } from '../accounts/entities/account.entity';
+import { DevicesService } from '../devices/devices.service';
+import { ExpoPushService } from '../push/expo-push.service';
 
 @Injectable()
 export class NotificationsService {
@@ -11,15 +13,114 @@ export class NotificationsService {
     private readonly notificationRepository: Repository<Notification>,
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
+    private readonly devicesService: DevicesService,
+    private readonly expoPushService: ExpoPushService,
   ) {}
 
   // Create notification
   async create(data: Partial<Notification>) {
     const notification = this.notificationRepository.create(data);
-    return this.notificationRepository.save(notification);
+    const saved = await this.notificationRepository.save(notification);
+
+    // Send push notification
+    if (data.accountId) {
+      await this.sendPushToUser(data.accountId, {
+        title: data.title || 'Thông báo mới',
+        body: data.content || '',
+        data: {
+          notificationId: saved.id,
+          type: data.type || '',
+          actionUrl: data.actionUrl || '',
+        },
+      });
+    }
+
+    return saved;
   }
 
-  // Get all notifications for a user
+  // Send push notification to user's devices (public for direct use)
+  async sendPushToUser(
+    userId: string,
+    notification: {
+      title: string;
+      body: string;
+      data?: Record<string, any>;
+    }
+  ) {
+    const devices = await this.devicesService.getActiveDevicesByUser(userId);
+    const tokens = devices.map(d => d.expoPushToken);
+
+    if (tokens.length > 0) {
+      await this.expoPushService.sendToMultiple(tokens, notification);
+    }
+
+    return {
+      sent: tokens.length > 0,
+      devicesCount: tokens.length,
+    };
+  }
+
+  // Send push notification only (without creating notification record)
+  async sendPushOnly(
+    accountId: string,
+    title: string,
+    body: string,
+    data?: Record<string, any>
+  ) {
+    return this.sendPushToUser(accountId, { title, body, data });
+  }
+
+  // Get all notifications for a user with filters
+  async findAll(accountId: string, query: any) {
+    const qb = this.notificationRepository
+      .createQueryBuilder('n')
+      .where('n.accountId = :accountId', { accountId });
+
+    // Filter by type
+    if (query.type) {
+      qb.andWhere('n.type = :type', { type: query.type });
+    }
+
+    // Filter by store
+    if (query.storeId) {
+      qb.andWhere('n.storeId = :storeId', { storeId: query.storeId });
+    }
+
+    // Filter by date range
+    if (query.dateFrom) {
+      qb.andWhere('n.createdAt >= :dateFrom', { dateFrom: new Date(query.dateFrom) });
+    }
+    if (query.dateTo) {
+      qb.andWhere('n.createdAt <= :dateTo', { dateTo: new Date(query.dateTo) });
+    }
+
+    // Search by title
+    if (query.search) {
+      qb.andWhere('n.title ILIKE :search', { search: `%${query.search}%` });
+    }
+
+    // Pagination
+    const page = query.page || 1;
+    const limit = query.limit || 20;
+    qb.skip((page - 1) * limit).take(limit);
+
+    // Order by newest first
+    qb.orderBy('n.createdAt', 'DESC');
+
+    const [data, total] = await qb.getManyAndCount();
+
+    return {
+      data,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  // Get all notifications for a user (legacy - kept for backward compatibility)
   async getByAccountId(accountId: string, unreadOnly: boolean = false) {
     const where: any = { accountId };
     if (unreadOnly) {
@@ -54,6 +155,15 @@ export class NotificationsService {
       { isRead: true, readAt: new Date() },
     );
     return { message: 'Đã đánh dấu tất cả thông báo là đã đọc' };
+  }
+
+  // Mark all notifications as read for a specific store
+  async markAllAsReadForStore(accountId: string, storeId: string) {
+    await this.notificationRepository.update(
+      { accountId, storeId, isRead: false },
+      { isRead: true, readAt: new Date() },
+    );
+    return { message: 'Đã đánh dấu tất cả thông báo của cửa hàng là đã đọc' };
   }
 
   // Delete notification

@@ -4,11 +4,9 @@ import { Account } from '../../accounts/entities/account.entity';
 
 export enum NotificationType {
   SYSTEM = 'Hệ thống',
-  SALARY = 'Lương',
-  KPI = 'KPI',
-  ATTENDANCE = 'Chấm công',
-  ANNOUNCEMENT = 'Thông báo',
-  OTHER = 'Khác',
+  SCHEDULE_CONFIRMATION = 'Xác nhận lịch',
+  SHIFT_APPROVAL = 'Duyệt ca',
+  STAFF_SHORTAGE = 'Thiếu nhân viên',
 }
 
 export enum NotificationPriority {
@@ -26,6 +24,9 @@ export class Notification extends BaseEntity {
   @ManyToOne(() => Account, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'account_id' })
   account: Account;
+
+  @Column({ name: 'store_id', nullable: true })
+  storeId: string; // For filtering by store
 
   @Column()
   title: string; // Tiêu đề thông báo

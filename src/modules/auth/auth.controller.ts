@@ -20,7 +20,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Đăng nhập vào hệ thống',
-    description: 'Sử dụng email và mật khẩu để lấy Access Token',
+    description: 'Sử dụng email hoặc số điện thoại và mật khẩu để lấy Access Token',
   })
   @ApiResponse({
     status: 200,
@@ -36,15 +36,15 @@ export class AuthController {
     schema: {
       type: 'object',
       properties: {
-        email: { type: 'string', example: 'user@example.com' },
+        emailOrPhone: { type: 'string', example: 'user@example.com hoặc 0901234567' },
         password: { type: 'string', example: 'password123' },
       },
     },
   })
   async login(@Body() body: any) {
-    const user = await this.authService.validateUser(body.email, body.password);
+    const user = await this.authService.validateUser(body.emailOrPhone, body.password);
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Email/Số điện thoại hoặc mật khẩu không đúng');
     }
     return this.authService.login(user);
   }
@@ -81,7 +81,7 @@ export class AuthController {
     schema: {
       type: 'object',
       properties: {
-        email: { type: 'string', example: 'user@example.com' },
+        phone: { type: 'string', example: '0901234567' },
         otp: { type: 'string', example: '123456' },
         type: {
           type: 'string',
@@ -89,22 +89,22 @@ export class AuthController {
           example: 'register',
         },
       },
-      required: ['email', 'otp'],
+      required: ['phone', 'otp'],
     },
   })
   async verifyOtp(
-    @Body('email') email: string,
+    @Body('phone') phone: string,
     @Body('otp') otp: string,
     @Body('type') type: 'register' | 'forgot-password' = 'register',
   ) {
-    return this.authService.verifyOtp(email, otp, type);
+    return this.authService.verifyOtp(phone, otp, type);
   }
 
   @Post('resend-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Gửi lại mã OTP',
-    description: 'Gửi lại mã OTP mới qua email',
+    description: 'Gửi lại mã OTP mới qua Zalo ZNS',
   })
   @ApiResponse({
     status: 200,
@@ -112,25 +112,25 @@ export class AuthController {
     type: AuthMessageDto,
   })
   async resendOtp(
-    @Body('email') email: string,
+    @Body('phone') phone: string,
     @Body('type') type?: 'register' | 'forgot-password',
   ) {
-    return this.authService.resendOtp(email, type);
+    return this.authService.resendOtp(phone, type);
   }
 
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Quên mật khẩu',
-    description: 'Gửi yêu cầu reset mật khẩu qua email',
+    description: 'Gửi OTP qua Zalo ZNS để reset mật khẩu',
   })
   @ApiResponse({
     status: 200,
-    description: 'Đã gửi link reset mật khẩu',
+    description: 'Đã gửi mã OTP qua Zalo',
     type: AuthMessageDto,
   })
-  async forgotPassword(@Body('email') email: string) {
-    return this.authService.forgotPassword(email);
+  async forgotPassword(@Body('phone') phone: string) {
+    return this.authService.forgotPassword(phone);
   }
 
   @Post('reset-password')
@@ -144,11 +144,21 @@ export class AuthController {
     description: 'Đổi mật khẩu thành công',
     type: AuthMessageDto,
   })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        phone: { type: 'string', example: '0901234567' },
+        newPassword: { type: 'string', example: 'newPassword123' },
+      },
+      required: ['phone', 'newPassword'],
+    },
+  })
   async resetPassword(
-    @Body('email') email: string,
+    @Body('phone') phone: string,
     @Body('newPassword') newPassword: string,
   ) {
-    return this.authService.resetPassword(email, newPassword);
+    return this.authService.resetPassword(phone, newPassword);
   }
 
   @Post('refresh-token')

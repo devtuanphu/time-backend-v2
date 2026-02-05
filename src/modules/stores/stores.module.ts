@@ -43,6 +43,7 @@ import {
   ShiftSlot,
   ShiftAssignment,
   ShiftSwap,
+  CycleShiftTemplate,
 } from './entities/shift-management.entity';
 import { EmployeeLeaveRequest } from './entities/employee-leave-request.entity';
 import { EmployeeAssetAssignment } from './entities/employee-asset-assignment.entity';
@@ -65,6 +66,7 @@ import { StorePayrollRule } from './entities/store-payroll-rule.entity';
 import { StorePayrollIncrementRule } from './entities/store-payroll-increment-rule.entity';
 import { StoreInternalRule } from './entities/store-internal-rule.entity';
 import { StorePermissionConfig } from './entities/store-permission-config.entity';
+import { StoreShiftConfig } from './entities/store-shift-config.entity';
 
 
 import { SalaryAdjustment } from './entities/salary-adjustment.entity';
@@ -118,6 +120,7 @@ import { ScheduleModule } from '@nestjs/schedule';
       ShiftSlot,
       ShiftAssignment,
       ShiftSwap,
+      CycleShiftTemplate,
       EmployeeLeaveRequest,
       EmployeeAssetAssignment,
       ServiceCategory,
@@ -142,6 +145,7 @@ import { ScheduleModule } from '@nestjs/schedule';
       StorePayrollIncrementRule,
       StoreInternalRule,
       StorePermissionConfig,
+      StoreShiftConfig,
       AssetExportType,
 
       ProductExportType,

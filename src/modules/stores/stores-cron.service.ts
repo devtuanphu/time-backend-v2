@@ -64,4 +64,61 @@ export class StoresCronService {
       this.logger.error('Failed to create monthly employee summaries:', error);
     }
   }
+
+  /**
+   * Cron job chạy vào 00:15 (12:15 AM) mỗi ngày
+   * Xử lý các chu kỳ làm việc hết hạn và hẹn dừng
+   */
+  @Cron('15 0 * * *', {
+    name: 'process-expired-work-cycles',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async handleProcessExpiredCycles() {
+    this.logger.log('Starting to process expired and scheduled-stop work cycles...');
+    
+    try {
+      const result = await this.storesService.processExpiredCycles();
+      this.logger.log(`Processed work cycles: ${result.expiredCount} expired, ${result.stoppedCount} stopped`);
+    } catch (error) {
+      this.logger.error('Failed to process expired work cycles:', error);
+    }
+  }
+
+  /**
+   * Cron job chạy vào 00:20 (12:20 AM) mỗi ngày
+   * Tạo shift slots cho ngày mai cho các chu kỳ DAILY/WEEKLY/MONTHLY
+   */
+  @Cron('20 0 * * *', {
+    name: 'generate-daily-slots',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async handleGenerateDailySlots() {
+    this.logger.log('Starting to generate slots for tomorrow for all active cycles...');
+    
+    try {
+      const result = await this.storesService.generateDailySlotsForAllCycles();
+      this.logger.log(`Generated slots: ${result.createdSlots} slots for ${result.processedCycles} cycles`);
+    } catch (error) {
+      this.logger.error('Failed to generate daily slots:', error);
+    }
+  }
+
+  /**
+   * Cron job chạy vào 00:25 (12:25 AM) mỗi ngày
+   * Tạo shift slots cho ngày mai cho các chu kỳ vô thời hạn (dựa trên template)
+   */
+  @Cron('25 0 * * *', {
+    name: 'generate-slots-indefinite-cycles',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async handleGenerateSlotsForIndefiniteCycles() {
+    this.logger.log('Starting to generate slots for indefinite work cycles...');
+    
+    try {
+      const result = await this.storesService.generateDailySlotsForIndefiniteCycles();
+      this.logger.log(`Processed ${result.processedCount} indefinite cycles`);
+    } catch (error) {
+      this.logger.error('Failed to generate slots for indefinite cycles:', error);
+    }
+  }
 }

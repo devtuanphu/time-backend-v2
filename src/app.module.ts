@@ -8,6 +8,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { StoresModule } from './modules/stores/stores.module';
 import { MailModule } from './modules/mail/mail.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { DevicesModule } from './modules/devices/devices.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 
@@ -39,6 +40,7 @@ import { join } from 'path';
     StoresModule,
     MailModule,
     NotificationsModule,
+    DevicesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

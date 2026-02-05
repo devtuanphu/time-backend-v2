@@ -9,6 +9,7 @@ import { Repository, MoreThan, IsNull } from 'typeorm';
 import { MailService } from '../mail/mail.service';
 import { AccountOtp } from '../accounts/entities/account-otp.entity';
 import { AccountStatus } from '../accounts/entities/account.entity';
+import { ZaloService } from '../zalo/zalo.service';
 
 @Injectable()
 export class AuthService {
@@ -21,10 +22,14 @@ export class AuthService {
     @InjectRepository(AccountOtp)
     private readonly otpRepository: Repository<AccountOtp>,
     private readonly mailService: MailService,
+    private readonly zaloService: ZaloService,
   ) {}
 
-  async validateUser(email: string, pass: string): Promise<any> {
-    const user = await this.accountsService.findByEmail(email);
+  /**
+   * Validate user by email OR phone + password
+   */
+  async validateUser(emailOrPhone: string, pass: string): Promise<any> {
+    const user = await this.accountsService.findByEmailOrPhone(emailOrPhone);
     if (user && (await bcrypt.compare(pass, user.passwordHash))) {
       const { passwordHash, ...result } = user;
       return result;
@@ -87,19 +92,21 @@ export class AuthService {
       });
       await this.otpRepository.save(otpEntity);
 
-      // Send email
+      // Send OTP via Zalo ZNS (thay vì email)
       try {
-        await this.mailService.sendVerificationCode(user.email, user.fullName, otpCode);
+        await this.zaloService.sendOtp(data.phone, otpCode, 'register');
         return {
-          message: 'Đăng ký thành công. Vui lòng kiểm tra email để nhận mã xác thực.',
-          email: user.email,
+          message: 'Đăng ký thành công. Vui lòng kiểm tra Zalo để nhận mã xác thực.',
+          phone: data.phone,
         };
       } catch (error) {
-        console.error('Failed to send email:', error);
+        console.error('Failed to send ZNS:', error);
+        // Fallback: gửi email nếu ZNS fail
+        // await this.mailService.sendVerificationCode(user.email, user.fullName, otpCode);
         return {
-          message: 'Đăng ký thành công, nhưng không thể gửi email xác thực. Bạn có thể kiểm tra mã OTP trong database.',
-          email: user.email,
-          otp_debug: otpCode, // Chỉ dùng lúc dev để bạn có mã xác thực luôn
+          message: 'Đăng ký thành công, nhưng không thể gửi OTP qua Zalo. Vui lòng thử lại.',
+          phone: data.phone,
+          otp_debug: otpCode, // Chỉ dùng lúc dev
         };
       }
     } catch (error) {
@@ -110,10 +117,10 @@ export class AuthService {
     }
   }
 
-  async verifyOtp(email: string, otp: string , type: 'register' | 'forgot-password' = 'register') {
-    const user = await this.accountsService.findByEmail(email);
+  async verifyOtp(phone: string, otp: string , type: 'register' | 'forgot-password' = 'register') {
+    const user = await this.accountsService.findByPhone(phone);
     if (!user) {
-      throw new UnauthorizedException('Không tìm thấy tài khoản.');
+      throw new UnauthorizedException('Không tìm thấy tài khoản với số điện thoại này.');
     }
 
     const formattedType = type === 'register' ? 'REGISTER' : 'FORGOT_PASSWORD';
@@ -144,14 +151,14 @@ export class AuthService {
     }
 
     return {
-      message: "Xác thực thành công. Bây giờ bạn có thể đặt lại mật khẩu mới if cần."
+      message: "Xác thực thành công. Bây giờ bạn có thể đặt lại mật khẩu mới."
     }
   }
 
-  async resendOtp(email: string, type: 'register' | 'forgot-password' = 'register') {
-    const user = await this.accountsService.findByEmail(email);
+  async resendOtp(phone: string, type: 'register' | 'forgot-password' = 'register') {
+    const user = await this.accountsService.findByPhone(phone);
     if (!user) {
-      throw new UnauthorizedException('Không tìm thấy tài khoản.');
+      throw new UnauthorizedException('Không tìm thấy tài khoản với số điện thoại này.');
     }
 
     if (type === 'register' && user.status === AccountStatus.ACTIVE) {
@@ -176,20 +183,24 @@ export class AuthService {
     await this.otpRepository.save(otpEntity);
 
     try {
-      if (type === 'register') {
-        await this.mailService.sendVerificationCode(user.email, user.fullName, otpCode);
-      } else {
-        await this.mailService.sendPasswordResetOtp(user.email, user.fullName, otpCode);
-      }
-      return { message: 'Mã OTP mới đã được gửi.', email: user.email };
+      // Gửi OTP qua Zalo ZNS
+      await this.zaloService.sendOtp(user.phone, otpCode, type);
+      return { message: 'Mã OTP mới đã được gửi qua Zalo.', phone: user.phone };
     } catch (error) {
-      return { message: 'Lỗi gửi mail.', email: user.email, otp_debug: otpCode };
+      console.error('Failed to send ZNS:', error);
+      // Fallback: gửi email nếu ZNS fail
+      // if (type === 'register') {
+      //   await this.mailService.sendVerificationCode(user.email, user.fullName, otpCode);
+      // } else {
+      //   await this.mailService.sendPasswordResetOtp(user.email, user.fullName, otpCode);
+      // }
+      return { message: 'Lỗi gửi OTP qua Zalo.', phone: user.phone, otp_debug: otpCode };
     }
   }
 
-  async forgotPassword(email: string) {
-    const user = await this.accountsService.findByEmail(email);
-    if (!user) throw new UnauthorizedException('Không tìm thấy tài khoản.');
+  async forgotPassword(phone: string) {
+    const user = await this.accountsService.findByPhone(phone);
+    if (!user) throw new UnauthorizedException('Không tìm thấy tài khoản với số điện thoại này.');
 
     // Vô hiệu hóa các OTP cũ cho luồng quên mật khẩu
     await this.otpRepository.update(
@@ -208,13 +219,21 @@ export class AuthService {
     });
     await this.otpRepository.save(otpEntity);
 
-    await this.mailService.sendPasswordResetOtp(user.email, user.fullName, otpCode);
-    return { message: 'Mã OTP đặt lại mật khẩu đã được gửi.', email: user.email };
+    // Gửi OTP qua Zalo ZNS thay vì email
+    try {
+      await this.zaloService.sendOtp(user.phone, otpCode, 'forgot-password');
+      return { message: 'Mã OTP đặt lại mật khẩu đã được gửi qua Zalo.', phone: user.phone };
+    } catch (error) {
+      console.error('Failed to send ZNS:', error);
+      // Fallback email nếu cần
+      // await this.mailService.sendPasswordResetOtp(user.email, user.fullName, otpCode);
+      return { message: 'Lỗi gửi OTP. Vui lòng thử lại.', phone: user.phone, otp_debug: otpCode };
+    }
   }
 
-  async resetPassword(email: string, newPassword: string) {
-    const user = await this.accountsService.findByEmail(email);
-    if (!user) throw new UnauthorizedException('Không tìm thấy tài khoản.');
+  async resetPassword(phone: string, newPassword: string) {
+    const user = await this.accountsService.findByPhone(phone);
+    if (!user) throw new UnauthorizedException('Không tìm thấy tài khoản với số điện thoại này.');
 
     // KIỂM TRA BẢO MẬT: Phải có ít nhất 1 OTP "FORGOT_PASSWORD" đã được verify (isUsed=true)
     // trong vòng 15 phút gần nhất để chứng minh bước verify-otp đã thực sự diễn ra.

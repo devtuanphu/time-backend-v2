@@ -41,6 +41,7 @@ import { CreateProductExportTypeDto } from './dto/product-export.dto';
 import { StoreProbationSettingDto } from './dto/store-probation-setting.dto';
 import { StoreApprovalSettingDto } from './dto/store-approval-setting.dto';
 import { StoreTimekeepingSettingDto } from './dto/store-timekeeping-setting.dto';
+import { UpdateStoreShiftConfigDto } from './dto/store-shift-config.dto';
 import { UpdateInternalRuleDto, InternalRuleResponseDto } from './dto/store-internal-rule.dto';
 import { StorePermissionConfigDto } from './dto/store-permission-config.dto';
 
@@ -587,6 +588,19 @@ export class StoresController {
   @ApiOperation({ summary: 'Cập nhật cấu hình chấm công' })
   async updateTimekeepingSetting(@Param('id') id: string, @Body() body: StoreTimekeepingSettingDto) {
     return this.storesService.upsertTimekeepingSetting(id, body);
+  }
+
+  // Shift Config (Ca làm việc)
+  @Get(':id/shift-config')
+  @ApiOperation({ summary: 'Lấy cấu hình ca làm việc' })
+  async getShiftConfig(@Param('id') id: string) {
+    return this.storesService.getShiftConfig(id);
+  }
+
+  @Put(':id/shift-config')
+  @ApiOperation({ summary: 'Cập nhật cấu hình ca làm việc' })
+  async updateShiftConfig(@Param('id') id: string, @Body() body: UpdateStoreShiftConfigDto) {
+    return this.storesService.upsertShiftConfig(id, body);
   }
 
 
@@ -1200,6 +1214,198 @@ export class StoresController {
   })
   async getWorkShifts(@Param('id') id: string) {
     return this.storesService.getWorkShifts(id);
+  }
+
+  @Put(':storeId/work-shifts/:shiftId')
+  @ApiOperation({
+    summary: 'Cập nhật ca làm việc',
+    description: 'Cập nhật thông tin ca làm việc (tên, giờ bắt đầu, giờ kết thúc, ghi chú)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Cập nhật thành công',
+    type: WorkShiftResponseDto,
+  })
+  async updateWorkShift(
+    @Param('storeId') storeId: string,
+    @Param('shiftId') shiftId: string,
+    @Body() body: any,
+  ) {
+    return this.storesService.updateWorkShift(storeId, shiftId, body);
+  }
+
+  // ==================== WORK CYCLE MANAGEMENT ====================
+
+  @Get(':id/active-cycle')
+  @ApiOperation({ 
+    summary: 'Lấy chu kỳ đang hoạt động',
+    description: 'Mỗi cửa hàng chỉ có 1 chu kỳ active tại 1 thời điểm' 
+  })
+  @ApiResponse({ status: 200, description: 'Chu kỳ đang active hoặc null' })
+  async getActiveCycle(@Param('id') storeId: string) {
+    return this.storesService.getActiveCycle(storeId);
+  }
+
+  @Post(':id/work-cycles')
+  @ApiOperation({
+    summary: 'Tạo chu kỳ làm việc',
+    description: 'Tạo chu kỳ mới. Phải dừng chu kỳ cũ trước khi tạo mới. Hỗ trợ 4 loại: DAILY, WEEKLY, MONTHLY, INDEFINITE',
+  })
+  @ApiResponse({ status: 201, description: 'Tạo thành công' })
+  async createWorkCycle(@Param('id') storeId: string, @Body() body: any) {
+    return this.storesService.createWorkCycle(storeId, body);
+  }
+
+  @Get(':id/work-cycles')
+  @ApiOperation({ summary: 'Lấy danh sách chu kỳ làm việc' })
+  @ApiResponse({ status: 200, description: 'Danh sách chu kỳ' })
+  async getWorkCycles(@Param('id') storeId: string) {
+    return this.storesService.getWorkCycles(storeId);
+  }
+
+  @Get('work-cycles/:cycleId')
+  @ApiOperation({ summary: 'Lấy chi tiết chu kỳ làm việc' })
+  @ApiResponse({ status: 200, description: 'Chi tiết chu kỳ với slots và assignments' })
+  async getWorkCycleById(@Param('cycleId') cycleId: string) {
+    return this.storesService.getWorkCycleById(cycleId);
+  }
+
+  @Put('work-cycles/:cycleId')
+  @ApiOperation({ summary: 'Cập nhật chu kỳ làm việc' })
+  @ApiResponse({ status: 200, description: 'Cập nhật thành công' })
+  async updateWorkCycle(
+    @Param('cycleId') cycleId: string,
+    @Body() body: any,
+  ) {
+    return this.storesService.updateWorkCycle(cycleId, body);
+  }
+
+  @Put('work-cycles/:cycleId/stop')
+  @ApiOperation({
+    summary: 'Dừng chu kỳ làm việc',
+    description: 'Dừng chu kỳ ngay lập tức hoặc hẹn giờ dừng. Dữ liệu lịch sử được giữ lại.',
+  })
+  @ApiResponse({ status: 200, description: 'Dừng thành công' })
+  async stopWorkCycle(
+    @Param('cycleId') cycleId: string,
+    @Body() body: { stopImmediately?: boolean; scheduledStopAt?: string },
+  ) {
+    return this.storesService.stopWorkCycle(cycleId, body);
+  }
+
+  @Put('work-cycles/:cycleId/activate')
+  @ApiOperation({
+    summary: 'Kích hoạt chu kỳ làm việc',
+    description: 'Chuyển chu kỳ từ DRAFT sang ACTIVE. Kiểm tra không có chu kỳ khác đang active.',
+  })
+  @ApiResponse({ status: 200, description: 'Kích hoạt thành công' })
+  async activateWorkCycle(@Param('cycleId') cycleId: string) {
+    return this.storesService.activateWorkCycle(cycleId);
+  }
+
+  // ==================== SHIFT SLOT MANAGEMENT ====================
+
+  @Post('work-cycles/:cycleId/slots')
+  @ApiOperation({
+    summary: 'Tạo slot ca làm việc',
+    description: 'Tạo các slot ca cho từng ngày trong chu kỳ (bulk create)',
+  })
+  @ApiResponse({ status: 201, description: 'Tạo thành công' })
+  async createShiftSlots(
+    @Param('cycleId') cycleId: string,
+    @Body() body: { slots: any[] },
+  ) {
+    return this.storesService.createShiftSlots(cycleId, body.slots);
+  }
+
+  @Get('work-cycles/:cycleId/slots')
+  @ApiOperation({ summary: 'Lấy danh sách slot ca trong chu kỳ' })
+  @ApiResponse({ status: 200, description: 'Danh sách slot' })
+  async getShiftSlots(@Param('cycleId') cycleId: string) {
+    return this.storesService.getShiftSlots(cycleId);
+  }
+
+  @Put('shift-slots/:slotId')
+  @ApiOperation({ summary: 'Cập nhật slot ca' })
+  @ApiResponse({ status: 200, description: 'Cập nhật thành công' })
+  async updateShiftSlot(
+    @Param('slotId') slotId: string,
+    @Body() body: any,
+  ) {
+    return this.storesService.updateShiftSlot(slotId, body);
+  }
+
+  @Delete('shift-slots/:slotId')
+  @ApiOperation({ summary: 'Xóa slot ca' })
+  @ApiResponse({ status: 200, description: 'Xóa thành công' })
+  async deleteShiftSlot(@Param('slotId') slotId: string) {
+    return this.storesService.deleteShiftSlot(slotId);
+  }
+
+  // ==================== SHIFT ASSIGNMENT MANAGEMENT ====================
+
+  @Post('shift-slots/:slotId/register')
+  @ApiOperation({
+    summary: 'Đăng ký/gắn nhân viên vào slot ca',
+    description: 'Nhân viên đăng ký hoặc Owner gắn nhân viên vào ca',
+  })
+  @ApiResponse({ status: 201, description: 'Đăng ký thành công' })
+  async registerToShiftSlot(
+    @Param('slotId') slotId: string,
+    @Body() body: { employeeId: string; note?: string },
+  ) {
+    return this.storesService.registerToShiftSlot(slotId, body.employeeId, body.note);
+  }
+
+  @Get(':id/shift-assignments')
+  @ApiOperation({ summary: 'Lấy danh sách đăng ký ca của cửa hàng' })
+  @ApiQuery({ name: 'cycleId', required: false, description: 'Lọc theo chu kỳ' })
+  @ApiQuery({ name: 'status', required: false, description: 'Lọc theo trạng thái' })
+  @ApiResponse({ status: 200, description: 'Danh sách đăng ký' })
+  async getShiftAssignments(
+    @Param('id') storeId: string,
+    @Query('cycleId') cycleId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.storesService.getShiftAssignments(storeId, { cycleId, status });
+  }
+
+  @Put('shift-assignments/:assignmentId/status')
+  @ApiOperation({
+    summary: 'Duyệt/Từ chối đăng ký ca',
+    description: 'Owner thay đổi trạng thái: CONFIRMED hoặc CANCELLED',
+  })
+  @ApiResponse({ status: 200, description: 'Cập nhật thành công' })
+  async updateAssignmentStatus(
+    @Param('assignmentId') assignmentId: string,
+    @Body() body: { status: string; note?: string },
+  ) {
+    return this.storesService.updateAssignmentStatus(assignmentId, body.status, body.note);
+  }
+
+  // ==================== SHIFT SWAP MANAGEMENT ====================
+
+  @Post('shift-swaps')
+  @ApiOperation({
+    summary: 'Tạo yêu cầu đổi ca',
+    description: 'Nhân viên yêu cầu đổi ca với nhân viên khác',
+  })
+  @ApiResponse({ status: 201, description: 'Tạo yêu cầu thành công' })
+  async createShiftSwap(@Body() body: any) {
+    return this.storesService.createShiftSwap(body);
+  }
+
+  @Put('shift-swaps/:swapId/status')
+  @ApiOperation({
+    summary: 'Duyệt/Từ chối yêu cầu đổi ca',
+    description: 'Owner hoặc nhân viên được đổi xác nhận',
+  })
+  @ApiResponse({ status: 200, description: 'Cập nhật thành công' })
+  async updateShiftSwapStatus(
+    @Param('swapId') swapId: string,
+    @Body() body: { status: string; note?: string },
+  ) {
+    return this.storesService.updateShiftSwapStatus(swapId, body.status, body.note);
   }
 
   // Assets
@@ -2220,79 +2426,6 @@ export class StoresController {
     @Body() body: { status: InventoryReportStatus; adminNote?: string },
   ) {
     return this.storesService.handleInventoryReport(id, body);
-  }
-
-  // Work Cycles & Shifts
-  @Post(':id/work-cycles')
-  async createWorkCycle(@Param('id') id: string, @Body() body: any) {
-    return this.storesService.createWorkCycle(id, body);
-  }
-
-  @Get(':id/work-cycles')
-  async getWorkCycles(@Param('id') id: string) {
-    return this.storesService.getWorkCycles(id);
-  }
-
-  @Get('work-cycles/:cycleId/slots')
-  async getShiftSlots(
-    @Param('cycleId') cycleId: string,
-    @Query('date') date?: string,
-  ) {
-    return this.storesService.getShiftSlots(cycleId, date);
-  }
-
-  @Post('shift-slots/:slotId/register')
-  async registerShift(
-    @GetUser() user: any,
-    @Param('slotId') slotId: string,
-    @Body('note') note: string,
-  ) {
-    // Note: We need to find the employee profile for the current user
-    const profile = await this.storesService.getEmployeeByAccountId(
-      user.userId,
-    );
-    if (!profile) throw new NotFoundException('Employee profile not found');
-    return this.storesService.registerShift(profile.id, slotId, note);
-  }
-
-  @Post('shift-slots/:slotId/assign')
-  async adminAssignShift(
-    @Param('slotId') slotId: string,
-    @Body('employeeId') employeeId: string,
-    @Body('note') note: string,
-  ) {
-    return this.storesService.adminAssignShift(slotId, employeeId, note);
-  }
-
-  @Put('shift-assignments/:assignmentId/status')
-  async confirmShiftAssignment(
-    @Param('assignmentId') assignmentId: string,
-    @Body('status') status: any,
-  ) {
-    return this.storesService.confirmShiftAssignment(assignmentId, status);
-  }
-
-  @Post('shift-assignments/:assignmentId/swap')
-  async createShiftSwap(
-    @GetUser() user: any,
-    @Param('assignmentId') assignmentId: string,
-    @Body() body: any,
-  ) {
-    const profile = await this.storesService.getEmployeeByAccountId(
-      user.userId,
-    );
-    if (!profile) throw new NotFoundException('Employee profile not found');
-    return this.storesService.createShiftSwap(
-      assignmentId,
-      body.toEmployeeId,
-      profile.id,
-      body.note,
-    );
-  }
-
-  @Put('shift-swaps/:swapId/approve')
-  async approveShiftSwap(@Param('swapId') swapId: string) {
-    return this.storesService.approveShiftSwap(swapId);
   }
 
   // Service Categories

@@ -38,7 +38,7 @@ import { EmployeeKpi, KpiStatus } from './entities/employee-kpi.entity';
 import { KpiTask } from './entities/kpi-task.entity';
 import { DailyEmployeeReport } from './entities/daily-employee-report.entity';
 import { EmployeeMonthlySummary } from './entities/employee-monthly-summary.entity';
-import { EmployeePerformance } from './entities/employee-performance.entity';
+import { EmployeePerformance, PerformanceType } from './entities/employee-performance.entity';
 import { EmployeeLeaveRequest, LeaveRequestStatus } from './entities/employee-leave-request.entity';
 import { EmployeeAssetAssignment, AssetAssignmentStatus } from './entities/employee-asset-assignment.entity';
 import { StoreEvent, StoreEventType } from './entities/store-event.entity';
@@ -56,6 +56,9 @@ import {
   WorkCycleStatus,
   ShiftAssignmentStatus,
   ShiftSwapStatus,
+  CycleType,
+  CycleShiftTemplate,
+  WeekDaySchedule,
 } from './entities/shift-management.entity';
 import { KpiApprovalRequest, KpiRequestStatus } from './entities/kpi-approval-request.entity';
 import { InventoryReport, InventoryReportStatus } from './entities/inventory-report.entity';
@@ -102,6 +105,8 @@ import { StoreInternalRule } from './entities/store-internal-rule.entity';
 import { UpdateInternalRuleDto } from './dto/store-internal-rule.dto';
 import { StorePermissionConfig } from './entities/store-permission-config.entity';
 import { StorePermissionConfigDto } from './dto/store-permission-config.dto';
+import { StoreShiftConfig, WeekDay, TimekeepingRequirement } from './entities/store-shift-config.entity';
+import { CreateStoreShiftConfigDto, UpdateStoreShiftConfigDto } from './dto/store-shift-config.dto';
 import { CreateFnbServiceItemDto, RecipeDto, CreateYieldServiceItemDto, CreatePersonalCareItemDto, CreatePetCareItemDto } from './dto/order-management.dto';
 
 
@@ -240,6 +245,10 @@ export class StoresService {
     private readonly internalRuleRepository: Repository<StoreInternalRule>,
     @InjectRepository(StorePermissionConfig)
     private readonly permissionConfigRepository: Repository<StorePermissionConfig>,
+    @InjectRepository(StoreShiftConfig)
+    private readonly shiftConfigRepository: Repository<StoreShiftConfig>,
+    @InjectRepository(CycleShiftTemplate)
+    private readonly cycleTemplateRepository: Repository<CycleShiftTemplate>,
 
     @InjectRepository(AccountFinance)
     private readonly financeRepository: Repository<AccountFinance>,
@@ -276,6 +285,9 @@ export class StoresService {
 
     // Tạo Default Internal Rules (Nội quy nội bộ)
     await this.createDefaultInternalRules(savedStore.id);
+
+    // Tạo Default Shift Config (Cấu hình ca làm việc)
+    await this.createDefaultShiftConfig(savedStore.id);
 
     return savedStore;
   }
@@ -742,7 +754,7 @@ export class StoresService {
         if (incData.id) {
           incRule = currentIncRules.find(r => r.id === incData.id);
         } else {
-          incRule = currentIncRules.find(r => r.type === incData.type && r.conditionType === incData.conditionType && r.conditionValue === incData.conditionValue);
+          incRule = currentIncRules.find(r => r.type === (incData.type as IncrementRuleType) && r.conditionType === incData.conditionType && r.conditionValue === incData.conditionValue);
         }
 
 
@@ -1065,7 +1077,24 @@ export class StoresService {
       }
     }
 
-    return { success: true };
+    // Return updated account data for frontend sync
+    const updatedAccount = await this.accountsService.findById(accountId);
+    if (!updatedAccount) {
+      throw new NotFoundException('Không thể lấy thông tin tài khoản sau khi cập nhật');
+    }
+    
+    return {
+      success: true,
+      fullName: updatedAccount.fullName,
+      phone: updatedAccount.phone,
+      email: updatedAccount.email,
+      gender: updatedAccount.gender,
+      birthday: updatedAccount.birthday,
+      avatar: updatedAccount.avatar,
+      address: updatedAccount.address,
+      city: updatedAccount.city,
+      district: updatedAccount.district,
+    };
 
   }
 
@@ -1118,7 +1147,7 @@ export class StoresService {
         ratingLabel: p.ratingLabel,
         reviewerName:
           p.reviewerAccount?.fullName ||
-          (p.type === 'Tự đánh giá' ? 'Tự đánh giá' : 'Hệ thống'),
+          (p.type === PerformanceType.SELF ? 'Tự đánh giá' : 'Hệ thống'),
         date: p.performanceDate,
       }));
 
@@ -1378,7 +1407,7 @@ export class StoresService {
     });
 
     // Map Pending Registers
-    assignments.filter(a => a.status === 'PENDING').forEach(assign => {
+    assignments.filter(a => a.status === ShiftAssignmentStatus.PENDING).forEach(assign => {
       shiftRequests.push({
         id: assign.id,
         type: 'REGISTER',
@@ -1413,7 +1442,7 @@ export class StoresService {
       let status: string = assign.status;
       
       // Check for late
-      if (assign.status === 'COMPLETED' && assign.shiftSlot?.workShift) {
+      if (assign.status === ShiftAssignmentStatus.COMPLETED && assign.shiftSlot?.workShift) {
          if (assign.checkInTime && new Date(assign.checkInTime) > new Date(assign.shiftSlot.workShift.startTime)) status = 'LATE'; 
       }
 
@@ -1797,7 +1826,530 @@ export class StoresService {
     });
   }
 
-  // Asset management
+  async updateWorkShift(storeId: string, shiftId: string, data: Partial<WorkShift>) {
+    const shift = await this.workShiftRepository.findOne({
+      where: { id: shiftId, storeId },
+    });
+    
+    if (!shift) {
+      throw new NotFoundException('Không tìm thấy ca làm việc');
+    }
+
+    await this.workShiftRepository.update(shiftId, data);
+    return this.workShiftRepository.findOne({ where: { id: shiftId } });
+  }
+
+  // ==================== WORK CYCLE MANAGEMENT ====================
+
+  // Lấy chu kỳ đang active của cửa hàng (chỉ có 1 tại 1 thời điểm)
+  async getActiveCycle(storeId: string) {
+    return this.workCycleRepository.findOne({
+      where: { storeId, status: WorkCycleStatus.ACTIVE },
+      relations: ['slots', 'slots.workShift', 'templates', 'templates.workShift'],
+    });
+  }
+
+  // Tính ngày kết thúc dựa trên loại chu kỳ
+  private calculateEndDate(startDate: string, cycleType: CycleType): string | null {
+    const start = new Date(startDate);
+    
+    switch (cycleType) {
+      case CycleType.DAILY:
+        return startDate; // Kết thúc ngay trong ngày
+      case CycleType.WEEKLY: {
+        const weekEnd = new Date(start);
+        weekEnd.setDate(weekEnd.getDate() + 6); // 7 ngày
+        return weekEnd.toISOString().split('T')[0];
+      }
+      case CycleType.MONTHLY: {
+        const monthEnd = new Date(start);
+        monthEnd.setMonth(monthEnd.getMonth() + 1);
+        monthEnd.setDate(monthEnd.getDate() - 1); // Ngày cuối tháng
+        return monthEnd.toISOString().split('T')[0];
+      }
+      case CycleType.INDEFINITE:
+        return null; // Vô thời hạn
+      default:
+        return null;
+    }
+  }
+
+  // Lấy ngày trong tuần của 1 date
+  private getDayOfWeek(dateString: string): WeekDaySchedule {
+    const date = new Date(dateString);
+    const days: WeekDaySchedule[] = [
+      WeekDaySchedule.SUNDAY,
+      WeekDaySchedule.MONDAY,
+      WeekDaySchedule.TUESDAY,
+      WeekDaySchedule.WEDNESDAY,
+      WeekDaySchedule.THURSDAY,
+      WeekDaySchedule.FRIDAY,
+      WeekDaySchedule.SATURDAY,
+    ];
+    return days[date.getDay()];
+  }
+
+  // Tạo chu kỳ mới
+  async createWorkCycle(
+    storeId: string,
+    data: {
+      name: string;
+      cycleType: CycleType;
+      startDate: string;
+      workShiftIds?: string[];
+      slots?: { workShiftId: string; workDate: string; maxStaff?: number }[];
+      templates?: { workShiftId: string; dayOfWeek: WeekDaySchedule; maxStaff?: number }[];
+    },
+  ) {
+    // Kiểm tra xem có chu kỳ active không
+    const activeCycle = await this.getActiveCycle(storeId);
+    if (activeCycle) {
+      throw new BadRequestException(
+        'Cửa hàng đã có chu kỳ đang hoạt động. Vui lòng dừng chu kỳ hiện tại trước khi tạo mới.',
+      );
+    }
+
+    // Tính ngày kết thúc
+    const endDate = this.calculateEndDate(data.startDate, data.cycleType);
+
+    // Tạo chu kỳ
+    const cycle = this.workCycleRepository.create({
+      storeId,
+      name: data.name,
+      cycleType: data.cycleType,
+      startDate: data.startDate,
+      endDate,
+      status: WorkCycleStatus.ACTIVE,
+    });
+    const savedCycle = await this.workCycleRepository.save(cycle);
+
+    // Nếu là INDEFINITE, tạo templates
+    if (data.cycleType === CycleType.INDEFINITE && data.templates?.length) {
+      const templateEntities = data.templates.map((t) =>
+        this.cycleTemplateRepository.create({
+          cycleId: savedCycle.id,
+          workShiftId: t.workShiftId,
+          dayOfWeek: t.dayOfWeek,
+          maxStaff: t.maxStaff || 1,
+        }),
+      );
+      await this.cycleTemplateRepository.save(templateEntities);
+      
+      // Tạo slots CHỈ cho ngày startDate (cron job sẽ tạo cho các ngày sau)
+      await this.generateSlotsFromTemplate(savedCycle.id, data.startDate, 1);
+    } 
+    // Nếu có slots được truyền vào
+    else if (data.slots?.length) {
+      const slotEntities = data.slots.map((s) =>
+        this.shiftSlotRepository.create({
+          cycleId: savedCycle.id,
+          workShiftId: s.workShiftId,
+          workDate: s.workDate,
+          maxStaff: s.maxStaff || 1,
+        }),
+      );
+      await this.shiftSlotRepository.save(slotEntities);
+    }
+    // Nếu có workShiftIds, auto-generate slots cho tất cả ngày trong chu kỳ
+    else if (data.workShiftIds?.length && endDate) {
+      await this.autoGenerateSlots(savedCycle.id, data.startDate, endDate, data.workShiftIds);
+    }
+
+    return this.workCycleRepository.findOne({
+      where: { id: savedCycle.id },
+      relations: ['slots', 'slots.workShift', 'templates', 'templates.workShift'],
+    });
+  }
+
+  // Auto-generate slots CHỈ cho ngày startDate (tránh xung đột khi dừng chu kỳ giữa chừng)
+  private async autoGenerateSlots(
+    cycleId: string,
+    startDate: string,
+    endDate: string,
+    workShiftIds: string[],
+  ) {
+    const slots: Partial<ShiftSlot>[] = [];
+    
+    // CHỈ tạo slot cho ngày startDate
+    for (const shiftId of workShiftIds) {
+      slots.push({
+        cycleId,
+        workShiftId: shiftId,
+        workDate: startDate,
+        maxStaff: 1,
+      });
+    }
+
+    if (slots.length > 0) {
+      const slotEntities = slots.map((s) => this.shiftSlotRepository.create(s));
+      await this.shiftSlotRepository.save(slotEntities);
+    }
+  }
+
+  // Generate slots từ template cho N ngày tới (dùng cho INDEFINITE)
+  async generateSlotsFromTemplate(cycleId: string, fromDate: string, daysAhead: number) {
+    const cycle = await this.workCycleRepository.findOne({
+      where: { id: cycleId },
+      relations: ['templates'],
+    });
+    if (!cycle || !cycle.templates?.length) return;
+
+    const slots: Partial<ShiftSlot>[] = [];
+    const start = new Date(fromDate);
+
+    for (let i = 0; i < daysAhead; i++) {
+      const currentDate = new Date(start);
+      currentDate.setDate(currentDate.getDate() + i);
+      const dateStr = currentDate.toISOString().split('T')[0];
+      const dayOfWeek = this.getDayOfWeek(dateStr);
+
+      // Tìm templates cho ngày này
+      const dayTemplates = cycle.templates.filter((t) => t.dayOfWeek === dayOfWeek);
+      for (const template of dayTemplates) {
+        // Kiểm tra slot đã tồn tại chưa
+        const existing = await this.shiftSlotRepository.findOne({
+          where: { cycleId, workShiftId: template.workShiftId, workDate: dateStr },
+        });
+        if (!existing) {
+          slots.push({
+            cycleId,
+            workShiftId: template.workShiftId,
+            workDate: dateStr,
+            maxStaff: template.maxStaff,
+          });
+        }
+      }
+    }
+
+    if (slots.length > 0) {
+      const slotEntities = slots.map((s) => this.shiftSlotRepository.create(s));
+      await this.shiftSlotRepository.save(slotEntities);
+    }
+  }
+
+  async getWorkCycles(storeId: string) {
+    return this.workCycleRepository.find({
+      where: { storeId },
+      order: { createdAt: 'DESC' },
+      relations: ['slots', 'slots.workShift', 'templates', 'templates.workShift'],
+    });
+  }
+
+  async getWorkCycleById(cycleId: string) {
+    return this.workCycleRepository.findOne({
+      where: { id: cycleId },
+      relations: ['slots', 'slots.workShift', 'slots.assignments', 'slots.assignments.employee', 'templates', 'templates.workShift'],
+    });
+  }
+
+  async updateWorkCycle(cycleId: string, data: Partial<WorkCycle>) {
+    await this.workCycleRepository.update(cycleId, data);
+    return this.getWorkCycleById(cycleId);
+  }
+
+  // Dừng chu kỳ (không xóa, chỉ chuyển status)
+  async stopWorkCycle(
+    cycleId: string,
+    options: { stopImmediately?: boolean; scheduledStopAt?: string } = { stopImmediately: true },
+  ) {
+    const cycle = await this.workCycleRepository.findOne({ where: { id: cycleId } });
+    if (!cycle) {
+      throw new NotFoundException('Chu kỳ không tồn tại');
+    }
+    if (cycle.status !== WorkCycleStatus.ACTIVE) {
+      throw new BadRequestException('Chỉ có thể dừng chu kỳ đang hoạt động');
+    }
+
+    if (options.stopImmediately !== false) {
+      // Dừng ngay
+      await this.workCycleRepository.update(cycleId, {
+        status: WorkCycleStatus.STOPPED,
+        stoppedAt: new Date(),
+      });
+    } else if (options.scheduledStopAt) {
+      // Hẹn giờ dừng
+      await this.workCycleRepository.update(cycleId, {
+        scheduledStopAt: new Date(options.scheduledStopAt),
+      });
+    }
+
+    return this.getWorkCycleById(cycleId);
+  }
+
+  // Kích hoạt chu kỳ (chuyển từ DRAFT sang ACTIVE)
+  async activateWorkCycle(cycleId: string) {
+    const cycle = await this.workCycleRepository.findOne({ where: { id: cycleId } });
+    if (!cycle) {
+      throw new NotFoundException('Chu kỳ không tồn tại');
+    }
+
+    // Kiểm tra xem có chu kỳ active khác không
+    const activeCycle = await this.getActiveCycle(cycle.storeId);
+    if (activeCycle && activeCycle.id !== cycleId) {
+      throw new BadRequestException(
+        'Cửa hàng đã có chu kỳ đang hoạt động. Vui lòng dừng chu kỳ hiện tại trước.',
+      );
+    }
+
+    await this.workCycleRepository.update(cycleId, {
+      status: WorkCycleStatus.ACTIVE,
+    });
+
+    return this.getWorkCycleById(cycleId);
+  }
+
+  // Xử lý chu kỳ hết hạn (gọi bởi cron job)
+  async processExpiredCycles() {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Tìm các chu kỳ active đã hết hạn
+    const expiredCycles = await this.workCycleRepository
+      .createQueryBuilder('cycle')
+      .where('cycle.status = :status', { status: WorkCycleStatus.ACTIVE })
+      .andWhere('cycle.endDate IS NOT NULL')
+      .andWhere('cycle.endDate < :today', { today })
+      .getMany();
+
+    for (const cycle of expiredCycles) {
+      await this.workCycleRepository.update(cycle.id, {
+        status: WorkCycleStatus.EXPIRED,
+      });
+    }
+
+    // Xử lý các chu kỳ có lịch hẹn dừng
+    const scheduledStopCycles = await this.workCycleRepository
+      .createQueryBuilder('cycle')
+      .where('cycle.status = :status', { status: WorkCycleStatus.ACTIVE })
+      .andWhere('cycle.scheduledStopAt IS NOT NULL')
+      .andWhere('cycle.scheduledStopAt <= :now', { now: new Date() })
+      .getMany();
+
+    for (const cycle of scheduledStopCycles) {
+      await this.workCycleRepository.update(cycle.id, {
+        status: WorkCycleStatus.STOPPED,
+        stoppedAt: new Date(),
+      });
+    }
+
+    return { expiredCount: expiredCycles.length, stoppedCount: scheduledStopCycles.length };
+  }
+
+  // Tạo slots cho ngày mai cho TẤT CẢ chu kỳ ACTIVE (gọi bởi cron job hàng ngày)
+  async generateDailySlotsForAllCycles() {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    // Lấy tất cả chu kỳ ACTIVE (trừ INDEFINITE - sẽ xử lý riêng)
+    const activeCycles = await this.workCycleRepository
+      .createQueryBuilder('cycle')
+      .leftJoinAndSelect('cycle.slots', 'slot')
+      .where('cycle.status = :status', { status: WorkCycleStatus.ACTIVE })
+      .andWhere('cycle.cycleType != :indefinite', { indefinite: CycleType.INDEFINITE })
+      .andWhere('(cycle.endDate IS NULL OR cycle.endDate >= :tomorrow)', { tomorrow: tomorrowStr })
+      .getMany();
+
+    let createdCount = 0;
+
+    for (const cycle of activeCycles) {
+      // Kiểm tra xem đã có slots cho ngày mai chưa
+      const existingSlots = await this.shiftSlotRepository.find({
+        where: { cycleId: cycle.id, workDate: tomorrowStr },
+      });
+
+      if (existingSlots.length > 0) {
+        continue; // Đã có slots rồi, skip
+      }
+
+      // Lấy danh sách ca từ slot đầu tiên (giả định dùng cùng các ca)
+      const firstDaySlots = await this.shiftSlotRepository.find({
+        where: { cycleId: cycle.id, workDate: cycle.startDate },
+      });
+
+      if (firstDaySlots.length === 0) {
+        continue; // Không có slots mẫu
+      }
+
+      // Tạo slots cho ngày mai dựa trên slots ngày đầu tiên
+      const newSlots = firstDaySlots.map((slot) =>
+        this.shiftSlotRepository.create({
+          cycleId: cycle.id,
+          workShiftId: slot.workShiftId,
+          workDate: tomorrowStr,
+          maxStaff: slot.maxStaff,
+        }),
+      );
+
+      await this.shiftSlotRepository.save(newSlots);
+      createdCount += newSlots.length;
+    }
+
+    return { processedCycles: activeCycles.length, createdSlots: createdCount };
+  }
+
+  // Tạo slots cho chu kỳ INDEFINITE (gọi bởi cron job hàng ngày)
+  async generateDailySlotsForIndefiniteCycles() {
+    const indefiniteCycles = await this.workCycleRepository.find({
+      where: { cycleType: CycleType.INDEFINITE, status: WorkCycleStatus.ACTIVE },
+    });
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+    
+    for (const cycle of indefiniteCycles) {
+      // Tạo slots cho ngày mai dựa trên template
+      await this.generateSlotsFromTemplate(cycle.id, tomorrowStr, 1);
+    }
+
+    return { processedCount: indefiniteCycles.length };
+  }
+
+  // ==================== SHIFT SLOT MANAGEMENT ====================
+
+  async createShiftSlots(cycleId: string, slotsData: Partial<ShiftSlot>[]) {
+    const slots = slotsData.map((data) =>
+      this.shiftSlotRepository.create({ ...data, cycleId }),
+    );
+    return this.shiftSlotRepository.save(slots);
+  }
+
+  async getShiftSlots(cycleId: string, date?: string) {
+    const where: any = { cycleId };
+    if (date) {
+      where.workDate = date;
+    }
+    return this.shiftSlotRepository.find({
+      where,
+      relations: ['workShift', 'assignments', 'assignments.employee'],
+      order: { workDate: 'ASC' },
+    });
+  }
+
+  async updateShiftSlot(slotId: string, data: Partial<ShiftSlot>) {
+    await this.shiftSlotRepository.update(slotId, data);
+    return this.shiftSlotRepository.findOne({
+      where: { id: slotId },
+      relations: ['workShift', 'assignments'],
+    });
+  }
+
+  async deleteShiftSlot(slotId: string) {
+    await this.shiftSlotRepository.delete(slotId);
+    return { message: 'Shift slot deleted successfully' };
+  }
+
+  // ==================== SHIFT ASSIGNMENT MANAGEMENT ====================
+
+  async registerToShiftSlot(slotId: string, employeeId: string, note?: string) {
+    // Check if slot exists and has capacity
+    const slot = await this.shiftSlotRepository.findOne({
+      where: { id: slotId },
+      relations: ['assignments'],
+    });
+    if (!slot) throw new NotFoundException('Shift slot not found');
+
+    const currentCount = slot.assignments?.length || 0;
+    if (currentCount >= slot.maxStaff) {
+      throw new BadRequestException('Slot is full');
+    }
+
+    // Check if employee already registered
+    const existing = await this.shiftAssignmentRepository.findOne({
+      where: { shiftSlotId: slotId, employeeId },
+    });
+    if (existing) {
+      throw new BadRequestException('Employee already registered for this slot');
+    }
+
+    const assignment = this.shiftAssignmentRepository.create({
+      shiftSlotId: slotId,
+      employeeId,
+      note,
+      status: ShiftAssignmentStatus.PENDING,
+    });
+    return this.shiftAssignmentRepository.save(assignment);
+  }
+
+  async getShiftAssignments(
+    storeId: string,
+    filters: { cycleId?: string; status?: string },
+  ) {
+    const qb = this.shiftAssignmentRepository
+      .createQueryBuilder('assignment')
+      .leftJoinAndSelect('assignment.shiftSlot', 'slot')
+      .leftJoinAndSelect('slot.workShift', 'workShift')
+      .leftJoinAndSelect('slot.cycle', 'cycle')
+      .leftJoinAndSelect('assignment.employee', 'employee')
+      .leftJoinAndSelect('employee.account', 'account')
+      .where('cycle.storeId = :storeId', { storeId })
+      .orderBy('assignment.createdAt', 'DESC');
+
+    if (filters.cycleId) {
+      qb.andWhere('slot.cycleId = :cycleId', { cycleId: filters.cycleId });
+    }
+    if (filters.status) {
+      qb.andWhere('assignment.status = :status', { status: filters.status });
+    }
+
+    return qb.getMany();
+  }
+
+  async updateAssignmentStatus(
+    assignmentId: string,
+    status: string,
+    note?: string,
+  ) {
+    const assignment = await this.shiftAssignmentRepository.findOne({
+      where: { id: assignmentId },
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+
+    assignment.status = status as ShiftAssignmentStatus;
+    if (note) assignment.note = note;
+
+    return this.shiftAssignmentRepository.save(assignment);
+  }
+
+  // ==================== SHIFT SWAP MANAGEMENT ====================
+
+  async createShiftSwap(data: {
+    fromAssignmentId: string;
+    toEmployeeId: string;
+    requestedByEmployeeId: string;
+    note?: string;
+  }) {
+    const swap = this.shiftSwapRepository.create({
+      fromAssignmentId: data.fromAssignmentId,
+      toEmployeeId: data.toEmployeeId,
+      requestedByEmployeeId: data.requestedByEmployeeId,
+      note: data.note,
+      status: ShiftSwapStatus.PENDING,
+    });
+    return this.shiftSwapRepository.save(swap);
+  }
+
+  async updateShiftSwapStatus(swapId: string, status: string, note?: string) {
+    const swap = await this.shiftSwapRepository.findOne({
+      where: { id: swapId },
+      relations: ['fromAssignment'],
+    });
+    if (!swap) throw new NotFoundException('Shift swap request not found');
+
+    swap.status = status as ShiftSwapStatus;
+    if (note) swap.note = note;
+    await this.shiftSwapRepository.save(swap);
+
+    // If approved, transfer the assignment
+    if ((status as ShiftSwapStatus) === ShiftSwapStatus.APPROVED && swap.fromAssignment) {
+      swap.fromAssignment.employeeId = swap.toEmployeeId;
+      await this.shiftAssignmentRepository.save(swap.fromAssignment);
+    }
+
+    return swap;
+  }
+
+
   async createAssetsBulk(
     storeId: string,
     assetsData: any[],
@@ -3793,147 +4345,6 @@ export class StoresService {
     return this.inventoryReportRepository.save(report);
   }
 
-  // Work Cycle & Shift Management
-  async createWorkCycle(storeId: string, data: any) {
-    const cycle = new WorkCycle();
-    Object.assign(cycle, data);
-    cycle.storeId = storeId;
-    const savedCycle = await this.workCycleRepository.save(cycle);
-
-    // Auto-generate ShiftSlots
-    const shifts = await this.workShiftRepository.find({
-      where: { storeId, isActive: true },
-    });
-    const startDate = new Date(savedCycle.startDate);
-    const endDate = new Date(savedCycle.endDate);
-
-    const slots: ShiftSlot[] = [];
-    for (
-      let d = new Date(startDate);
-      d <= endDate;
-      d.setDate(d.getDate() + 1)
-    ) {
-      const dateStr = d.toISOString().split('T')[0];
-      for (const shift of shifts) {
-        const slot = new ShiftSlot();
-        slot.cycleId = (savedCycle as any).id;
-        slot.workShiftId = shift.id;
-        slot.workDate = dateStr;
-        slot.maxStaff = shift.defaultMaxStaff || 1;
-        slots.push(slot);
-      }
-    }
-
-    if (slots.length > 0) {
-      await this.shiftSlotRepository.save(slots);
-    }
-
-    return savedCycle;
-  }
-
-  async getWorkCycles(storeId: string) {
-    return this.workCycleRepository.find({
-      where: { storeId },
-      order: { startDate: 'DESC' },
-    });
-  }
-
-  async getWorkCycleById(id: string) {
-    return this.workCycleRepository.findOne({
-      where: { id },
-      relations: ['slots', 'slots.workShift'],
-    });
-  }
-
-  async updateWorkCycleStatus(id: string, status: WorkCycleStatus) {
-    await this.workCycleRepository.update(id, { status });
-    return this.getWorkCycleById(id);
-  }
-
-  async getShiftSlots(cycleId: string, date?: string) {
-    const where: any = { cycleId };
-    if (date) where.workDate = date;
-
-    return this.shiftSlotRepository.find({
-      where,
-      relations: ['workShift', 'assignments', 'assignments.employee'],
-    });
-  }
-
-  async registerShift(employeeId: string, slotId: string, note?: string) {
-    const slot = await this.shiftSlotRepository.findOne({
-      where: { id: slotId },
-      relations: ['assignments'],
-    });
-    if (!slot) throw new NotFoundException('Shift slot not found');
-
-    // Check if multi registration is allowed or already registered
-    const existing = slot.assignments.find((a) => a.employeeId === employeeId);
-    if (existing) return existing;
-
-    const assignment = new ShiftAssignment();
-    assignment.shiftSlotId = slotId;
-    assignment.employeeId = employeeId;
-    assignment.status = ShiftAssignmentStatus.PENDING;
-    assignment.note = note;
-
-    return this.shiftAssignmentRepository.save(assignment);
-  }
-
-  async adminAssignShift(slotId: string, employeeId: string, note?: string) {
-    const assignment = new ShiftAssignment();
-    assignment.shiftSlotId = slotId;
-    assignment.employeeId = employeeId;
-    assignment.status = ShiftAssignmentStatus.CONFIRMED;
-    assignment.note = note;
-
-    return this.shiftAssignmentRepository.save(assignment);
-  }
-
-  async confirmShiftAssignment(
-    assignmentId: string,
-    status: ShiftAssignmentStatus,
-  ) {
-    await this.shiftAssignmentRepository.update(assignmentId, { status });
-    return this.shiftAssignmentRepository.findOne({
-      where: { id: assignmentId },
-    });
-  }
-
-  async createShiftSwap(
-    assignmentId: string,
-    toEmployeeId: string,
-    requestedBy: string,
-    note?: string,
-  ) {
-    const swap = new ShiftSwap();
-    swap.fromAssignmentId = assignmentId;
-    swap.toEmployeeId = toEmployeeId;
-    swap.requestedByEmployeeId = requestedBy;
-    swap.note = note;
-    swap.status = ShiftSwapStatus.PENDING;
-
-    return (this.shiftSwapRepository as any).save(swap);
-  }
-
-  async approveShiftSwap(swapId: string) {
-    const swap = await this.shiftSwapRepository.findOne({
-      where: { id: swapId },
-      relations: ['fromAssignment'],
-    });
-    if (!swap) throw new NotFoundException('Swap request not found');
-
-    // Perform the actual swap
-    if (swap.toEmployeeId) {
-      await this.shiftAssignmentRepository.update(swap.fromAssignmentId, {
-        employeeId: swap.toEmployeeId,
-      });
-    }
-
-    swap.status = ShiftSwapStatus.APPROVED;
-    return (this.shiftSwapRepository as any).save(swap);
-  }
-
   // Service Category Management
   async createServiceCategory(storeId: string, data: any) {
     const category = this.serviceCategoryRepository.create({
@@ -4919,7 +5330,7 @@ export class StoresService {
     });
 
     if (!assignment) throw new NotFoundException('Không tìm thấy bản ghi cấp phát');
-    if (assignment.status !== 'ASSIGNED') {
+    if (assignment.status !== AssetAssignmentStatus.ASSIGNED) {
       throw new BadRequestException('Tài sản này đã được thu hồi hoặc không còn hiệu lực');
     }
 
@@ -6477,6 +6888,41 @@ export class StoresService {
 
     Object.assign(config, data);
     return this.permissionConfigRepository.save(config);
+  }
+
+  // --- Store Shift Config ---
+  async createDefaultShiftConfig(storeId: string) {
+    const defaultConfig = this.shiftConfigRepository.create({
+      storeId,
+      daysOff: [WeekDay.SATURDAY, WeekDay.SUNDAY],
+      noApprovalDays: [WeekDay.SATURDAY, WeekDay.SUNDAY],
+      timekeepingRequirement: TimekeepingRequirement.LOCATION_QR_GPS_FACEID,
+      isActive: true,
+    });
+    return this.shiftConfigRepository.save(defaultConfig);
+  }
+
+  async getShiftConfig(storeId: string) {
+    let config = await this.shiftConfigRepository.findOne({ where: { storeId } });
+    if (!config) {
+      config = await this.createDefaultShiftConfig(storeId);
+    }
+    return config;
+  }
+
+  async upsertShiftConfig(storeId: string, data: UpdateStoreShiftConfigDto) {
+    let config = await this.shiftConfigRepository.findOne({ where: { storeId } });
+
+    if (config) {
+      Object.assign(config, data);
+    } else {
+      config = this.shiftConfigRepository.create({
+        ...data,
+        storeId,
+      });
+    }
+
+    return this.shiftConfigRepository.save(config);
   }
 
   async createRole(storeId: string, data: any) {

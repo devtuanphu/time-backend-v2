@@ -44,6 +44,30 @@ export class AccountsService {
       .getOne();
   }
 
+  async findByPhone(phone: string) {
+    return this.accountRepository
+      .createQueryBuilder('account')
+      .addSelect('account.passwordHash')
+      .leftJoinAndSelect('account.identityDocument', 'identityDocument')
+      .leftJoinAndSelect('account.finance', 'finance')
+      .where('account.phone = :phone', { phone })
+      .getOne();
+  }
+
+  /**
+   * Find account by email OR phone number (for login with either)
+   */
+  async findByEmailOrPhone(emailOrPhone: string) {
+    return this.accountRepository
+      .createQueryBuilder('account')
+      .addSelect('account.passwordHash')
+      .leftJoinAndSelect('account.identityDocument', 'identityDocument')
+      .leftJoinAndSelect('account.finance', 'finance')
+      .where('account.email = :emailOrPhone', { emailOrPhone })
+      .orWhere('account.phone = :emailOrPhone', { emailOrPhone })
+      .getOne();
+  }
+
   async findById(id: string) {
     return this.accountRepository.findOne({
       where: { id },
