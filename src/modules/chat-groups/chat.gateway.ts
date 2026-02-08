@@ -2,6 +2,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
   SubscribeMessage,
+  OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
   ConnectedSocket,
@@ -16,7 +17,7 @@ import { ChatGroupsService } from './chat-groups.service';
   cors: { origin: '*' },
   namespace: '/chat',
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
@@ -24,6 +25,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private userSockets = new Map<string, Set<string>>(); // userId -> Set of socketIds
 
   constructor(private readonly chatGroupsService: ChatGroupsService) {}
+
+  afterInit() {
+    this.logger.log('✅ WebSocket Gateway initialized on namespace /chat');
+    this.logger.log(`🔌 Socket.io server is ready and listening for connections`);
+  }
 
   async handleConnection(client: Socket) {
     try {
