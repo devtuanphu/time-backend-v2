@@ -24,9 +24,11 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   private readonly logger = new Logger(ChatGateway.name);
   private userSockets = new Map<string, Set<string>>(); // userId -> Set of socketIds
 
-  constructor(private readonly chatGroupsService: ChatGroupsService) {}
+  constructor(private readonly chatGroupsService: ChatGroupsService) {
+    this.logger.log('🔌 ChatGateway instantiated — WebSocket namespace /chat');
+  }
 
-  afterInit() {
+  afterInit(server: Server) {
     this.logger.log('✅ WebSocket Gateway initialized on namespace /chat');
     this.logger.log(`🔌 Socket.io server is ready and listening for connections`);
   }

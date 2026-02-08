@@ -34,7 +34,13 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   await app.listen(process.env.PORT ?? 3000);
-  console.log(`Application is running on: ${await app.getUrl()}`);
-  console.log(`Swagger documentation: ${await app.getUrl()}/api/docs`);
+  const url = await app.getUrl();
+  console.log(`Application is running on: ${url}`);
+  console.log(`Swagger documentation: ${url}/api/docs`);
+  console.log(`\n========================================`);
+  console.log(`🔌 Socket.io WebSocket server: ACTIVE`);
+  console.log(`   Namespace: /chat`);
+  console.log(`   URL: ${url.replace('http', 'ws')}/chat`);
+  console.log(`========================================\n`);
 }
 bootstrap();
