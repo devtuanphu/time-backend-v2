@@ -4989,18 +4989,27 @@ export class StoresService {
   }
 
   async getOrders(storeId: string, filters: any = {}) {
-    const { type, status, startDate, endDate } = filters;
+    const { type, status, startDate, endDate, search } = filters;
     const query = this.orderRepository
       .createQueryBuilder('order')
+      .leftJoinAndSelect('order.employee', 'employee')
       .where('order.store_id = :storeId', { storeId });
 
     if (type) query.andWhere('order.type = :type', { type });
     if (status) query.andWhere('order.status = :status', { status });
     if (startDate && endDate) {
+      const adjustedEnd = new Date(endDate);
+      adjustedEnd.setHours(23, 59, 59, 999);
       query.andWhere('order.created_at BETWEEN :startDate AND :endDate', {
         startDate,
-        endDate,
+        endDate: adjustedEnd,
       });
+    }
+    if (search) {
+      query.andWhere(
+        '(order.code ILIKE :search OR order.customer_name ILIKE :search OR order.customer_phone ILIKE :search)',
+        { search: `%${search}%` },
+      );
     }
 
     query.orderBy('order.created_at', 'DESC');
@@ -5021,125 +5030,133 @@ export class StoresService {
 
   // --- Revenue Reporting ---
   async getRevenueReport(storeId: string, startDate: Date, endDate: Date) {
+    // Ensure endDate includes the full day
+    const adjustedEndDate = new Date(endDate);
+    adjustedEndDate.setHours(23, 59, 59, 999);
+
     // 1. Overall Summary (All orders in period)
     const summary = await this.orderRepository
-      .createQueryBuilder('order')
+      .createQueryBuilder('o')
       .select(
-        'SUM(CASE WHEN order.status = :completed THEN order.totalAmount ELSE 0 END)',
+        'SUM(CASE WHEN o.status = :completed THEN o."totalAmount" ELSE 0 END)',
         'totalRevenue',
       )
       .addSelect(
-        'SUM(CASE WHEN order.status = :completed THEN order.totalCost ELSE 0 END)',
+        'SUM(CASE WHEN o.status = :completed THEN o."totalCost" ELSE 0 END)',
         'totalCost',
       )
       .addSelect(
-        'SUM(CASE WHEN order.status = :completed THEN order.discountAmount ELSE 0 END)',
+        'SUM(CASE WHEN o.status = :completed THEN o."discountAmount" ELSE 0 END)',
         'totalDiscount',
       )
       .addSelect(
-        'SUM(CASE WHEN order.status = :completed THEN order.taxAmount ELSE 0 END)',
+        'SUM(CASE WHEN o.status = :completed THEN o."taxAmount" ELSE 0 END)',
         'totalTax',
       )
-      .addSelect('COUNT(order.id)', 'totalOrders')
+      .addSelect('COUNT(o.id)', 'totalOrders')
       .addSelect(
-        'COUNT(CASE WHEN order.status = :completed THEN 1 END)',
+        'COUNT(CASE WHEN o.status = :completed THEN 1 END)',
         'successOrders',
       )
       .addSelect(
-        'COUNT(CASE WHEN order.status = :cancelled THEN 1 END)',
+        'COUNT(CASE WHEN o.status = :cancelled THEN 1 END)',
         'failedOrders',
       )
-      .where('order.store_id = :storeId', {
+      .where('o.store_id = :storeId', {
         storeId,
         completed: OrderStatus.COMPLETED,
         cancelled: OrderStatus.CANCELLED,
       })
-      .andWhere('order.created_at BETWEEN :startDate AND :endDate', {
+      .andWhere('o.created_at BETWEEN :startDate AND :endDate', {
         startDate,
-        endDate,
+        endDate: adjustedEndDate,
       })
       .getRawOne();
 
     // 2. Daily Detailed Breakdown
     const dailyReport = await this.orderRepository
-      .createQueryBuilder('order')
-      .select("DATE_TRUNC('day', order.created_at)", 'date')
+      .createQueryBuilder('o')
+      .select("DATE_TRUNC('day', o.created_at)", 'date')
       .addSelect(
-        'SUM(CASE WHEN order.status = :completed THEN order.totalAmount ELSE 0 END)',
+        'SUM(CASE WHEN o.status = :completed THEN o."totalAmount" ELSE 0 END)',
         'revenue',
       )
       .addSelect(
-        'SUM(CASE WHEN order.status = :completed THEN order.totalCost ELSE 0 END)',
+        'SUM(CASE WHEN o.status = :completed THEN o."totalCost" ELSE 0 END)',
         'cost',
       )
       .addSelect(
-        'SUM(CASE WHEN order.status = :completed THEN order.discountAmount ELSE 0 END)',
+        'SUM(CASE WHEN o.status = :completed THEN o."discountAmount" ELSE 0 END)',
         'discount',
       )
       .addSelect(
-        'SUM(CASE WHEN order.status = :completed THEN order.taxAmount ELSE 0 END)',
+        'SUM(CASE WHEN o.status = :completed THEN o."taxAmount" ELSE 0 END)',
         'tax',
       )
-      .addSelect('COUNT(order.id)', 'totalOrders')
+      .addSelect('COUNT(o.id)', 'totalOrders')
       .addSelect(
-        'COUNT(CASE WHEN order.status = :completed THEN 1 END)',
+        'COUNT(CASE WHEN o.status = :completed THEN 1 END)',
         'successOrders',
       )
       .addSelect(
-        'COUNT(CASE WHEN order.status = :cancelled THEN 1 END)',
+        'COUNT(CASE WHEN o.status = :cancelled THEN 1 END)',
         'failedOrders',
       )
-      .where('order.store_id = :storeId', {
+      .where('o.store_id = :storeId', {
         storeId,
         completed: OrderStatus.COMPLETED,
         cancelled: OrderStatus.CANCELLED,
       })
-      .andWhere('order.created_at BETWEEN :startDate AND :endDate', {
+      .andWhere('o.created_at BETWEEN :startDate AND :endDate', {
         startDate,
-        endDate,
+        endDate: adjustedEndDate,
       })
-      .groupBy("DATE_TRUNC('day', order.created_at)")
+      .groupBy("DATE_TRUNC('day', o.created_at)")
       .orderBy('date', 'ASC')
       .getRawMany();
 
     // 3. Revenue by Service Type
     const byType = await this.orderRepository
-      .createQueryBuilder('order')
-      .select('order.type', 'type')
-      .addSelect('SUM(order.totalAmount)', 'revenue')
-      .addSelect('COUNT(order.id)', 'count')
-      .where('order.store_id = :storeId', { storeId })
-      .andWhere('order.status = :status', { status: OrderStatus.COMPLETED })
-      .andWhere('order.created_at BETWEEN :startDate AND :endDate', {
+      .createQueryBuilder('o')
+      .select('o.type', 'type')
+      .addSelect('SUM(o."totalAmount")', 'revenue')
+      .addSelect('COUNT(o.id)', 'count')
+      .where('o.store_id = :storeId', { storeId })
+      .andWhere('o.status = :status', { status: OrderStatus.COMPLETED })
+      .andWhere('o.created_at BETWEEN :startDate AND :endDate', {
         startDate,
-        endDate,
+        endDate: adjustedEndDate,
       })
-      .groupBy('order.type')
+      .groupBy('o.type')
       .getRawMany();
 
     // 4. Top Selling Items
-    const topItems = await this.orderItemRepository
-      .createQueryBuilder('item')
-      .innerJoin('item.order', 'order')
-      .select("item.itemSnapshot->>'name'", 'name')
-      .addSelect('SUM(item.quantity)', 'totalQuantity')
-      .addSelect('SUM(item.totalPrice)', 'totalRevenue')
-      .where('order.store_id = :storeId', { storeId })
-      .andWhere('order.status = :status', { status: OrderStatus.COMPLETED })
-      .andWhere('order.created_at BETWEEN :startDate AND :endDate', {
-        startDate,
-        endDate,
-      })
-      .groupBy("item.itemSnapshot->>'name'")
-      .orderBy('totalQuantity', 'DESC')
-      .limit(10)
-      .getRawMany();
+    let topItems: any[] = [];
+    try {
+      topItems = await this.orderItemRepository
+        .createQueryBuilder('item')
+        .innerJoin('item.order', 'o')
+        .select("item.\"itemSnapshot\"->>'name'", 'name')
+        .addSelect('SUM(item.quantity)', 'totalQuantity')
+        .addSelect('SUM(item."totalPrice")', 'totalRevenue')
+        .where('o.store_id = :storeId', { storeId })
+        .andWhere('o.status = :status', { status: OrderStatus.COMPLETED })
+        .andWhere('o.created_at BETWEEN :startDate AND :endDate', {
+          startDate,
+          endDate: adjustedEndDate,
+        })
+        .groupBy("item.\"itemSnapshot\"->>'name'")
+        .orderBy('"totalQuantity"', 'DESC')
+        .limit(10)
+        .getRawMany();
+    } catch (e) {
+      // If no order items exist yet, this query may fail
+      topItems = [];
+    }
 
-    const totalRev = parseFloat(summary.totalRevenue || 0);
-    const totalCost = parseFloat(summary.totalCost || 0);
-    const totalTax = parseFloat(summary.totalTax || 0);
-    // Profit = Revenue - Cost - Tax (Assuming Revenue includes tax)
-    // Or Profit = Subtotal - Discount - Cost
+    const totalRev = parseFloat(summary?.totalRevenue || 0);
+    const totalCost = parseFloat(summary?.totalCost || 0);
+    const totalTax = parseFloat(summary?.totalTax || 0);
     const totalProfit = totalRev - totalCost - totalTax;
 
     return {
@@ -5147,13 +5164,13 @@ export class StoresService {
         totalRevenue: totalRev,
         totalCost: totalCost,
         totalProfit: totalProfit,
-        totalDiscount: parseFloat(summary.totalDiscount || 0),
+        totalDiscount: parseFloat(summary?.totalDiscount || 0),
         totalTax: totalTax,
-        totalOrders: parseInt(summary.totalOrders || 0),
-        successOrders: parseInt(summary.successOrders || 0),
-        failedOrders: parseInt(summary.failedOrders || 0),
+        totalOrders: parseInt(summary?.totalOrders || '0'),
+        successOrders: parseInt(summary?.successOrders || '0'),
+        failedOrders: parseInt(summary?.failedOrders || '0'),
       },
-      daily: dailyReport.map((d) => {
+      daily: (dailyReport || []).map((d) => {
         const dRev = parseFloat(d.revenue);
         const dCost = parseFloat(d.cost);
         const dTax = parseFloat(d.tax);
@@ -5169,12 +5186,12 @@ export class StoresService {
           failedOrders: parseInt(d.failedOrders),
         };
       }),
-      byType: byType.map((t) => ({
+      byType: (byType || []).map((t) => ({
         type: t.type,
         revenue: parseFloat(t.revenue),
         count: parseInt(t.count),
       })),
-      topItems: topItems.map((i) => ({
+      topItems: (topItems || []).map((i) => ({
         name: i.name,
         quantity: parseInt(i.totalQuantity),
         revenue: parseFloat(i.totalRevenue),
