@@ -250,7 +250,7 @@ export class ZaloService implements OnModuleInit {
     try {
       const response = await firstValueFrom(
         this.httpService.post(
-          'https://oauth.zaloapp.com/v4/access_token',
+          'https://oauth.zaloapp.com/v4/oa/access_token',
           new URLSearchParams({
             code: code,
             app_id: appId,
@@ -273,7 +273,7 @@ export class ZaloService implements OnModuleInit {
       }
 
       // Lưu token vào DB
-      await this.initToken(access_token, refresh_token, parseInt(expires_in) || 90000);
+      await this.initToken(access_token, refresh_token, Number(expires_in) || 90000);
       
       this.logger.log('✅ OAuth token exchange thành công');
       return { message: 'Token đã được khởi tạo thành công từ OAuth' };
