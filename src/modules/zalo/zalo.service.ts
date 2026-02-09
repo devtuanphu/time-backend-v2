@@ -96,12 +96,20 @@ export class ZaloService implements OnModuleInit {
       );
 
       const { access_token, refresh_token, expires_in } = response.data;
+      this.logger.log(`Zalo refresh response: access_token=${!!access_token}, refresh_token=${!!refresh_token}, expires_in=${expires_in} (type: ${typeof expires_in})`);
+
+      if (!access_token || !refresh_token) {
+        throw new Error(`Zalo trả về token không hợp lệ: ${JSON.stringify(response.data)}`);
+      }
+
+      // expires_in có thể là number hoặc string, dùng Number() thay parseInt()
+      const expiresInSeconds = Number(expires_in) || 90000; // fallback 25 giờ
 
       // Cập nhật token trong DB
       tokenRecord.accessToken = access_token;
       tokenRecord.refreshToken = refresh_token;
       tokenRecord.accessTokenExpiresAt = new Date(
-        Date.now() + parseInt(expires_in) * 1000,
+        Date.now() + expiresInSeconds * 1000,
       );
       // Refresh token có hiệu lực 30 ngày
       tokenRecord.refreshTokenExpiresAt = new Date(
