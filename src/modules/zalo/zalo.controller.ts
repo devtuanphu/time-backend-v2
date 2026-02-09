@@ -46,7 +46,7 @@ export class ZaloController {
     const redirectUri = this.configService.get('ZALO_REDIRECT_URI') || 'http://localhost:3000/zalo/oauth-callback';
     
     // Zalo OAuth 2.0 authorization URL
-    const authUrl = `https://oauth.zaloapp.com/v4/permission?app_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=timeso`;
+    const authUrl = `https://oauth.zaloapp.com/v4/oa/permission?app_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=timeso`;
     
     return {
       message: 'Mở URL này trong browser để authorize Zalo',
