@@ -80,7 +80,7 @@ export class ZaloService implements OnModuleInit {
     try {
       const response = await firstValueFrom(
         this.httpService.post(
-          'https://oauth.zaloapp.com/v4/access_token',
+          'https://oauth.zaloapp.com/v4/oa/access_token',
           new URLSearchParams({
             refresh_token: tokenRecord.refreshToken,
             app_id: appId,
