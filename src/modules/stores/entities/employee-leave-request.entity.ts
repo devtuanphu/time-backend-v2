@@ -67,4 +67,7 @@ export class EmployeeLeaveRequest extends BaseEntity {
 
   @Column({ name: 'rejection_reason', type: 'text', nullable: true })
   rejectionReason: string;
+
+  @Column('simple-array', { name: 'attachments', nullable: true })
+  attachments: string[];
 }

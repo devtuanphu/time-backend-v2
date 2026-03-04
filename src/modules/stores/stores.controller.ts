@@ -374,6 +374,41 @@ export class StoresController {
     return this.storesService.getPetCareItems(storeId, categoryId);
   }
 
+  // Feedbacks — MUST be BEFORE GET ':id' to avoid route conflict
+  @Get('feedbacks')
+  @ApiOperation({ summary: 'Lấy danh sách feedback' })
+  @ApiQuery({ name: 'storeId', required: false })
+  @ApiQuery({ name: 'employeeProfileId', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  async getFeedbacksEarly(
+    @Query('storeId') storeId?: string,
+    @Query('employeeProfileId') employeeProfileId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.storesService.getFeedbacks({ storeId, employeeProfileId, status: status as any });
+  }
+
+  @Get('feedbacks/leaderboard')
+  @ApiOperation({ summary: 'Bảng xếp hạng feedback nhân viên theo store' })
+  @ApiQuery({ name: 'storeId', required: true })
+  async getFeedbackLeaderboardEarly(@Query('storeId') storeId: string) {
+    return this.storesService.getFeedbackLeaderboard(storeId);
+  }
+
+  // Shift Registrations — MUST be BEFORE GET ':id' to avoid route conflict
+  @Get('shift-registrations')
+  @ApiOperation({ summary: 'Lấy danh sách đề xuất đăng ký ca' })
+  @ApiQuery({ name: 'storeId', required: false })
+  @ApiQuery({ name: 'employeeProfileId', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  async getShiftRegistrationsEarly(
+    @Query('storeId') storeId?: string,
+    @Query('employeeProfileId') employeeProfileId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.storesService.getShiftRegistrations({ storeId, employeeProfileId, status });
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Lấy thông tin chi tiết cửa hàng',
@@ -974,17 +1009,19 @@ export class StoresController {
     @Param('requestId') requestId: string,
     @Body() body: ApprovalRequestDto,
   ) {
-    // Giả định lấy userId từ token (req.user.id -> profileId).
-    // Tạm thời hardcode hoặc lấy store owner nếu chưa có auth đầy đủ
-    // Cần logic map User -> EmployeeProfile (Manager)
-    const managerProfileId = 'ec7e3feb-985c-416a-870c-88c470a17ac6'; // TEMPORARY for test user
-    // Trong thực tế: const managerProfileId = await this.storesService.getProfileIdByAccountId(req.user.id);
+    // Resolve the authenticated user's profile from their account ID
+    const accountId = req.user?.userId || req.user?.id;
+    let managerProfileId = 'unknown';
+    if (accountId) {
+      const profile = await this.storesService.getEmployeeByAccountId(accountId);
+      if (profile) managerProfileId = profile.id;
+    }
 
     return this.storesService.processRequest(
-      managerProfileId, 
-      requestId, 
-      body.type, 
-      body.status, 
+      managerProfileId,
+      requestId,
+      body.type,
+      body.status,
       body.reason
     );
   }
@@ -2222,6 +2259,35 @@ export class StoresController {
     return this.storesService.updateKpiTaskProgress(id, actualValue);
   }
 
+  @Get('kpi-tasks')
+  @ApiOperation({ summary: 'Lấy danh sách nhiệm vụ KPI' })
+  @ApiQuery({ name: 'employeeKpiId', required: false })
+  @ApiQuery({ name: 'storeId', required: false })
+  @ApiQuery({ name: 'isHidden', required: false, type: Boolean })
+  async getKpiTasks(
+    @Query('employeeKpiId') employeeKpiId?: string,
+    @Query('storeId') storeId?: string,
+    @Query('isHidden') isHidden?: string,
+  ) {
+    return this.storesService.getKpiTasks({
+      employeeKpiId,
+      storeId,
+      isHidden: isHidden === 'true' ? true : isHidden === 'false' ? false : undefined,
+    });
+  }
+
+  @Delete('kpi-tasks/:id')
+  @ApiOperation({ summary: 'Xóa nhiệm vụ KPI' })
+  async deleteKpiTask(@Param('id') id: string) {
+    return this.storesService.deleteKpiTask(id);
+  }
+
+  @Patch('kpi-tasks/:id/hide')
+  @ApiOperation({ summary: 'Ẩn nhiệm vụ KPI' })
+  async hideKpiTask(@Param('id') id: string) {
+    return this.storesService.hideKpiTask(id);
+  }
+
   // Daily Employee Reports
   @Post(':id/daily-reports')
   @ApiOperation({
@@ -2810,4 +2876,317 @@ export class StoresController {
   ) {
     return this.storesService.upsertInternalRule(id, data, files);
   }
+
+  // Employee Reports (Staff)
+  @Get(':id/employee-daily-report')
+  @ApiOperation({ summary: 'Lấy báo cáo hàng ngày của nhân viên' })
+  @ApiQuery({ name: 'employeeProfileId', required: true })
+  @ApiQuery({ name: 'date', required: false, description: 'YYYY-MM-DD' })
+  async getEmployeeDailyReport(
+    @Param('id') storeId: string,
+    @Query('employeeProfileId') employeeProfileId: string,
+    @Query('date') date?: string,
+  ) {
+    return this.storesService.getEmployeeDailyReport(storeId, employeeProfileId, date);
+  }
+
+  @Get(':id/employee-monthly-report')
+  @ApiOperation({ summary: 'Lấy báo cáo tháng của nhân viên' })
+  @ApiQuery({ name: 'employeeProfileId', required: true })
+  @ApiQuery({ name: 'month', required: false, description: 'MM/YYYY' })
+  async getEmployeeMonthlyReport(
+    @Param('id') storeId: string,
+    @Query('employeeProfileId') employeeProfileId: string,
+    @Query('month') month?: string,
+  ) {
+    return this.storesService.getEmployeeMonthlyReport(storeId, employeeProfileId, month);
+  }
+
+  @Get(':id/employee-shift-hours')
+  @ApiOperation({ summary: 'Lấy thông tin ca & giờ đã làm của nhân viên' })
+  @ApiQuery({ name: 'employeeProfileId', required: true })
+  @ApiQuery({ name: 'month', required: false })
+  @ApiQuery({ name: 'filter', required: false })
+  async getEmployeeShiftHours(
+    @Param('id') storeId: string,
+    @Query('employeeProfileId') employeeProfileId: string,
+    @Query('month') month?: string,
+    @Query('filter') filter?: string,
+  ) {
+    return this.storesService.getEmployeeShiftHours(storeId, employeeProfileId, month, filter);
+  }
+
+  // Leave Requests (Staff)
+  @Post(':id/leave-requests')
+  @UseInterceptors(AnyFilesInterceptor(multerConfig))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Gửi đơn xin nghỉ phép' })
+  async createLeaveRequest(
+    @Param('id') id: string,
+    @Body() body: any,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    return this.storesService.createLeaveRequest({ ...body, storeId: id }, files);
+  }
+
+  @Get(':id/leave-requests')
+  @ApiOperation({ summary: 'Lấy danh sách đơn xin nghỉ theo cửa hàng' })
+  @ApiQuery({ name: 'status', required: false })
+  async getLeaveRequestsByStore(
+    @Param('id') id: string,
+    @Query('status') status?: string,
+  ) {
+    return this.storesService.getLeaveRequestsByStore(id, status as any);
+  }
+
+  @Get('employees/:profileId/leave-requests')
+  @ApiOperation({ summary: 'Lấy danh sách đơn xin nghỉ theo nhân viên' })
+  async getLeaveRequestsByEmployee(@Param('profileId') profileId: string) {
+    return this.storesService.getLeaveRequestsByEmployee(profileId);
+  }
+
+  @Patch('leave-requests/:requestId/cancel')
+  @ApiOperation({ summary: 'Hủy đơn xin nghỉ phép' })
+  async cancelLeaveRequest(
+    @Param('requestId') requestId: string,
+    @Body('employeeProfileId') employeeProfileId: string,
+  ) {
+    return this.storesService.cancelLeaveRequest(requestId, employeeProfileId);
+  }
+
+  // Feedback
+  @Post('feedbacks')
+  @UseInterceptors(AnyFilesInterceptor(multerConfig))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Gửi góp ý / feedback' })
+  async createFeedback(
+    @Body() body: any,
+    @UploadedFiles() files: Express.Multer.File[],
+    @GetUser() user: any,
+  ) {
+    const data = { ...body };
+    if (user?.userId) data.accountId = user.userId;
+    return this.storesService.createFeedback(data, files);
+  }
+
+  @Get('feedbacks')
+  @ApiOperation({ summary: 'Lấy danh sách feedback' })
+  @ApiQuery({ name: 'storeId', required: false })
+  @ApiQuery({ name: 'employeeProfileId', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  async getFeedbacks(
+    @Query('storeId') storeId?: string,
+    @Query('employeeProfileId') employeeProfileId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.storesService.getFeedbacks({
+      storeId,
+      employeeProfileId,
+      status: status as any,
+    });
+  }
+
+  @Get('feedbacks/leaderboard')
+  @ApiOperation({ summary: 'Bảng xếp hạng feedback nhân viên theo store' })
+  @ApiQuery({ name: 'storeId', required: true })
+  async getFeedbackLeaderboard(@Query('storeId') storeId: string) {
+    return this.storesService.getFeedbackLeaderboard(storeId);
+  }
+
+  @Post('shift-assignments/:id/checkout-mood')
+  @ApiOperation({ summary: 'Lưu cảm xúc sau ca làm việc' })
+  async recordCheckoutMood(
+    @Param('id') id: string,
+    @Body() body: { mood: string; note?: string },
+  ) {
+    return this.storesService.recordCheckoutMood(id, body.mood, body.note);
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // ATTENDANCE & FACE RECOGNITION
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  @Post('shift-assignments/:id/check-in')
+  @ApiOperation({ summary: 'Check-in ca làm việc bằng xác thực khuôn mặt' })
+  @UseInterceptors(FileInterceptor('photo', multerConfig))
+  async checkIn(
+    @Param('id') id: string,
+    @UploadedFile() photo: Express.Multer.File,
+  ) {
+    if (!photo) throw new BadRequestException('Photo is required');
+    return this.storesService.checkInWithFace(id, photo.buffer);
+  }
+
+  @Post('shift-assignments/:id/check-out')
+  @ApiOperation({ summary: 'Check-out ca làm việc bằng xác thực khuôn mặt' })
+  @UseInterceptors(FileInterceptor('photo', multerConfig))
+  async checkOut(
+    @Param('id') id: string,
+    @UploadedFile() photo: Express.Multer.File,
+  ) {
+    if (!photo) throw new BadRequestException('Photo is required');
+    return this.storesService.checkOutWithFace(id, photo.buffer);
+  }
+
+  @Post('employees/:employeeId/face-registration')
+  @ApiOperation({ summary: 'Đăng ký khuôn mặt nhân viên (Face ID style)' })
+  @UseInterceptors(FilesInterceptor('photos', 5, multerConfig))
+  async registerFace(
+    @Param('employeeId') employeeId: string,
+    @UploadedFiles() photos: Express.Multer.File[],
+    @Body('storeId') storeId: string,
+  ) {
+    if (!photos || photos.length < 3) {
+      throw new BadRequestException('At least 3 face photos required');
+    }
+    const buffers = photos.map((p) => p.buffer);
+    return this.storesService.registerFace(employeeId, storeId, buffers);
+  }
+
+  @Get('employees/:employeeId/face-registration')
+  @ApiOperation({ summary: 'Kiểm tra trạng thái đăng ký khuôn mặt' })
+  async getFaceRegistration(
+    @Param('employeeId') employeeId: string,
+  ) {
+    return this.storesService.getFaceRegistration(employeeId);
+  }
+
+  @Get(':id/attendance-logs')
+  @ApiOperation({ summary: 'Lịch sử chấm công' })
+  async getAttendanceLogs(
+    @Param('id') id: string,
+    @Query('employeeProfileId') employeeProfileId?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    return this.storesService.getAttendanceLogs(id, { employeeProfileId, dateFrom, dateTo });
+  }
+
+  @Get(':id/bonus-history')
+  @ApiOperation({ summary: 'Lịch sử thưởng' })
+  async getBonusHistory(
+    @Param('id') id: string,
+    @Query('month') month?: string,
+  ) {
+    return this.storesService.getBonusHistory(id, month);
+  }
+
+  @Get(':id/penalty-history')
+  @ApiOperation({ summary: 'Lịch sử phạt' })
+  async getPenaltyHistory(
+    @Param('id') id: string,
+    @Query('month') month?: string,
+  ) {
+    return this.storesService.getPenaltyHistory(id, month);
+  }
+
+  @Get('employees/:employeeId/next-shift-assignment')
+  @ApiOperation({ summary: 'Lấy ca tiếp theo hoặc ca đang active của nhân viên' })
+  async getNextShiftAssignment(
+    @Param('employeeId') employeeId: string,
+    @Query('storeId') storeId: string,
+  ) {
+    return this.storesService.getNextShiftAssignment(employeeId, storeId);
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // SHIFT REGISTRATION (Nhân viên đăng ký ca)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  @Post('shift-registrations')
+  @ApiOperation({
+    summary: 'Nhân viên gửi đề xuất đăng ký ca làm việc',
+    description: 'Nhân viên chọn ca và gửi yêu cầu để quản lý phê duyệt. Tạo một ShiftAssignment với status PENDING.',
+  })
+  @ApiResponse({ status: 201, description: 'Yêu cầu đăng ký ca đã được gửi' })
+  async createShiftRegistration(
+    @GetUser() user: any,
+    @Body() body: {
+      storeId: string;
+      employeeProfileId: string;
+      workShiftId?: string;
+      slotId?: string;
+      startDate?: string;
+      endDate?: string;
+      note?: string;
+    },
+  ) {
+    return this.storesService.createShiftRegistration(user.userId, body);
+  }
+
+  @Get('shift-registrations')
+  @ApiOperation({ summary: 'Lấy danh sách đề xuất đăng ký ca' })
+  @ApiQuery({ name: 'storeId', required: false })
+  @ApiQuery({ name: 'employeeProfileId', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  async getShiftRegistrations(
+    @Query('storeId') storeId?: string,
+    @Query('employeeProfileId') employeeProfileId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.storesService.getShiftRegistrations({ storeId, employeeProfileId, status });
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // SALARY INQUIRIES (Nhân viên hỏi về lương)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  @Post('employees/:profileId/salary-inquiries')
+  @ApiOperation({
+    summary: 'Gửi câu hỏi về lương tới quản lý',
+    description: 'Nhân viên đặt câu hỏi liên quan đến lương thưởng. Câu hỏi được lưu và thông báo tới quản lý.',
+  })
+  @ApiResponse({ status: 201, description: 'Câu hỏi đã được gửi thành công' })
+  async createSalaryInquiry(
+    @Param('profileId') profileId: string,
+    @GetUser() user: any,
+    @Body() body: { question: string; month?: string },
+  ) {
+    return this.storesService.createSalaryInquiry(profileId, body.question, body.month);
+  }
+
+  @Get('employees/:profileId/salary-inquiries')
+  @ApiOperation({ summary: 'Lấy danh sách câu hỏi lương của nhân viên' })
+  async getSalaryInquiries(@Param('profileId') profileId: string) {
+    return this.storesService.getSalaryInquiries(profileId);
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // SALARY SLIPS (Phiếu lương)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  @Post('employees/:profileId/salary-slips')
+  @ApiOperation({
+    summary: 'Yêu cầu xuất phiếu lương',
+    description: 'Lấy dữ liệu phiếu lương của nhân viên cho tháng được chỉ định. Trả về dữ liệu lương chi tiết.',
+  })
+  @ApiResponse({ status: 200, description: 'Dữ liệu phiếu lương' })
+  async createSalarySlip(
+    @Param('profileId') profileId: string,
+    @Body() body: { month: string },
+  ) {
+    return this.storesService.getSalarySlipData(profileId, body.month);
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // KPI AI SUGGESTIONS
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  @Post('kpi-ai-suggestions')
+  @ApiOperation({
+    summary: 'Gửi yêu cầu AI đề xuất KPI',
+    description: 'AI phân tích lịch sử hiệu suất của nhân viên và đề xuất các mục tiêu KPI phù hợp.',
+  })
+  @ApiResponse({ status: 201, description: 'Yêu cầu đã được tiếp nhận, AI đang xử lý' })
+  async requestKpiAiSuggestion(
+    @GetUser() user: any,
+    @Body() body: {
+      storeId: string;
+      employeeProfileId: string;
+      context?: string;
+    },
+  ) {
+    return this.storesService.requestKpiAiSuggestion(body);
+  }
 }
+

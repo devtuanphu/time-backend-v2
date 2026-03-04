@@ -2,12 +2,14 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { AccountsModule } from '../accounts/accounts.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { MailModule } from '../mail/mail.module';
 import { ZaloModule } from '../zalo/zalo.module';
+import { EmployeeProfile } from '../stores/entities/employee-profile.entity';
 
 @Module({
   imports: [
@@ -15,6 +17,7 @@ import { ZaloModule } from '../zalo/zalo.module';
     MailModule,
     ZaloModule,
     PassportModule,
+    TypeOrmModule.forFeature([EmployeeProfile]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

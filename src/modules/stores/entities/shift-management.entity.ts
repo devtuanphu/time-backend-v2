@@ -35,6 +35,15 @@ export enum ShiftSwapStatus {
   REJECTED = 'REJECTED',
 }
 
+export enum AttendanceStatus {
+  ON_TIME = 'ON_TIME',
+  LATE = 'LATE',
+  EARLY = 'EARLY',
+  LATE_AND_EARLY = 'LATE_AND_EARLY',
+  ABSENT = 'ABSENT',
+  FORGOT_CHECKOUT = 'FORGOT_CHECKOUT',
+}
+
 // Ngày trong tuần (cho lịch mẫu)
 export enum WeekDaySchedule {
   MONDAY = 'MONDAY',
@@ -184,6 +193,29 @@ export class ShiftAssignment extends BaseEntity {
 
     @Column({ type: 'text', nullable: true })
     note?: string;
+
+    @Column({ name: 'worked_minutes', type: 'int', default: 0 })
+    workedMinutes: number;
+
+    @Column({ name: 'late_minutes', type: 'int', default: 0 })
+    lateMinutes: number;
+
+    @Column({ name: 'early_minutes', type: 'int', default: 0 })
+    earlyMinutes: number;
+
+    @Column({
+      name: 'attendance_status',
+      type: 'enum',
+      enum: AttendanceStatus,
+      nullable: true,
+    })
+    attendanceStatus: AttendanceStatus;
+
+    @Column({ name: 'check_in_face_url', nullable: true })
+    checkInFaceUrl: string;
+
+    @Column({ name: 'check_out_face_url', nullable: true })
+    checkOutFaceUrl: string;
 }
 
 @Entity('shift_swaps')

@@ -75,4 +75,7 @@ export class KpiTask extends BaseEntity {
 
   @Column({ type: 'text', nullable: true })
   description: string;
+
+  @Column({ name: 'is_hidden', default: false })
+  isHidden: boolean;
 }

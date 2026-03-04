@@ -10,6 +10,7 @@ import { MailService } from '../mail/mail.service';
 import { AccountOtp } from '../accounts/entities/account-otp.entity';
 import { AccountStatus } from '../accounts/entities/account.entity';
 import { ZaloService } from '../zalo/zalo.service';
+import { EmployeeProfile } from '../stores/entities/employee-profile.entity';
 
 @Injectable()
 export class AuthService {
@@ -21,6 +22,8 @@ export class AuthService {
     private readonly refreshTokenRepository: Repository<AccountRefreshToken>,
     @InjectRepository(AccountOtp)
     private readonly otpRepository: Repository<AccountOtp>,
+    @InjectRepository(EmployeeProfile)
+    private readonly employeeProfileRepository: Repository<EmployeeProfile>,
     private readonly mailService: MailService,
     private readonly zaloService: ZaloService,
   ) {}
@@ -63,10 +66,27 @@ export class AuthService {
 
     const { passwordHash, ...cleanUser } = user;
 
+    // For staff app: include employeeProfile data
+    let employeeData: any = {};
+    if (appType === AppType.EMPLOYEE_APP) {
+      const profile = await this.employeeProfileRepository.findOne({
+        where: { accountId: user.id },
+        relations: ['store'],
+      });
+      if (profile) {
+        employeeData = {
+          employeeProfileId: profile.id,
+          storeId: profile.storeId,
+          storeName: profile.store?.name || '',
+          employmentStatus: profile.employmentStatus,
+        };
+      }
+    }
+
     return {
       access_token: accessToken,
       refresh_token: refreshTokenValue,
-      user: cleanUser,
+      user: { ...cleanUser, ...employeeData },
     };
   }
 

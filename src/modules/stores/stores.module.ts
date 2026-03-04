@@ -46,6 +46,8 @@ import {
   CycleShiftTemplate,
 } from './entities/shift-management.entity';
 import { EmployeeLeaveRequest } from './entities/employee-leave-request.entity';
+import { EmployeeFace } from './entities/employee-face.entity';
+import { AttendanceLog } from './entities/attendance-log.entity';
 import { EmployeeAssetAssignment } from './entities/employee-asset-assignment.entity';
 import {
   ServiceCategory,
@@ -67,6 +69,7 @@ import { StorePayrollIncrementRule } from './entities/store-payroll-increment-ru
 import { StoreInternalRule } from './entities/store-internal-rule.entity';
 import { StorePermissionConfig } from './entities/store-permission-config.entity';
 import { StoreShiftConfig } from './entities/store-shift-config.entity';
+import { Feedback } from './entities/feedback.entity';
 
 
 import { SalaryAdjustment } from './entities/salary-adjustment.entity';
@@ -80,6 +83,7 @@ import { StoresController } from './stores.controller';
 import { AccountsModule } from '../accounts/accounts.module';
 import { MailModule } from '../mail/mail.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { FaceRecognitionService } from './face-recognition.service';
 
 @Module({
   imports: [
@@ -122,6 +126,8 @@ import { ScheduleModule } from '@nestjs/schedule';
       ShiftSwap,
       CycleShiftTemplate,
       EmployeeLeaveRequest,
+      EmployeeFace,
+      AttendanceLog,
       EmployeeAssetAssignment,
       ServiceCategory,
       ServiceItem,
@@ -149,6 +155,7 @@ import { ScheduleModule } from '@nestjs/schedule';
       AssetExportType,
 
       ProductExportType,
+      Feedback,
 
     ]),
 
@@ -159,7 +166,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     ScheduleModule.forRoot(),
   ],
   controllers: [StoresController],
-  providers: [StoresService, StoresCronService],
+  providers: [StoresService, StoresCronService, FaceRecognitionService],
   exports: [StoresService],
 })
 export class StoresModule {}

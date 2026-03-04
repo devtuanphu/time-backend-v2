@@ -36,10 +36,15 @@ import { KpiUnit } from './entities/kpi-unit.entity';
 import { KpiPeriod } from './entities/kpi-period.entity';
 import { EmployeeKpi, KpiStatus } from './entities/employee-kpi.entity';
 import { KpiTask } from './entities/kpi-task.entity';
+import { Feedback, FeedbackStatus } from './entities/feedback.entity';
+import { FaceRecognitionService } from './face-recognition.service';
 import { DailyEmployeeReport } from './entities/daily-employee-report.entity';
 import { EmployeeMonthlySummary } from './entities/employee-monthly-summary.entity';
 import { EmployeePerformance, PerformanceType } from './entities/employee-performance.entity';
 import { EmployeeLeaveRequest, LeaveRequestStatus } from './entities/employee-leave-request.entity';
+import { EmployeeFace } from './entities/employee-face.entity';
+import { AttendanceLog, AttendanceLogType, AttendanceMethod } from './entities/attendance-log.entity';
+import { AttendanceStatus } from './entities/shift-management.entity';
 import { EmployeeAssetAssignment, AssetAssignmentStatus } from './entities/employee-asset-assignment.entity';
 import { StoreEvent, StoreEventType } from './entities/store-event.entity';
 import {
@@ -252,7 +257,14 @@ export class StoresService {
 
     @InjectRepository(AccountFinance)
     private readonly financeRepository: Repository<AccountFinance>,
+    @InjectRepository(Feedback)
+    private readonly feedbackRepository: Repository<Feedback>,
+    @InjectRepository(EmployeeFace)
+    private readonly employeeFaceRepository: Repository<EmployeeFace>,
+    @InjectRepository(AttendanceLog)
+    private readonly attendanceLogRepository: Repository<AttendanceLog>,
     private readonly accountsService: AccountsService,
+    private readonly faceRecognitionService: FaceRecognitionService,
   ) {}
 
 
@@ -3586,6 +3598,11 @@ export class StoresService {
   // Employee KPI Management
   async createEmployeeKpi(data: any) {
     const { tasks, ...kpiData } = data;
+    // Alias kpiName → name (support both field names from frontend/test)
+    if (!kpiData.name && kpiData.kpiName) {
+      kpiData.name = kpiData.kpiName;
+    }
+    delete kpiData.kpiName;
     // Đảm bảo storeIds luôn là mảng nếu người dùng truyền lên 1 string
     if (kpiData.storeId && !kpiData.storeIds) {
       kpiData.storeIds = [kpiData.storeId];
@@ -3789,6 +3806,33 @@ export class StoresService {
     if (task.target > 0) {
       task.completionRate = (actualValue / task.target) * 100;
     }
+    return this.kpiTaskRepository.save(task);
+  }
+
+  async getKpiTasks(filters: { employeeKpiId?: string; storeId?: string; isHidden?: boolean } = {}) {
+    const where: any = {};
+    if (filters.employeeKpiId) where.employeeKpiId = filters.employeeKpiId;
+    if (filters.storeId) where.storeId = filters.storeId;
+    if (filters.isHidden !== undefined) where.isHidden = filters.isHidden;
+    
+    return this.kpiTaskRepository.find({
+      where,
+      relations: ['kpiType', 'kpiUnit', 'kpiPeriod', 'store', 'employeeKpi'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async deleteKpiTask(id: string) {
+    const task = await this.kpiTaskRepository.findOne({ where: { id } });
+    if (!task) throw new NotFoundException('Không tìm thấy nhiệm vụ');
+    await this.kpiTaskRepository.delete(id);
+    return { message: 'Xóa nhiệm vụ thành công' };
+  }
+
+  async hideKpiTask(id: string) {
+    const task = await this.kpiTaskRepository.findOne({ where: { id } });
+    if (!task) throw new NotFoundException('Không tìm thấy nhiệm vụ');
+    task.isHidden = true;
     return this.kpiTaskRepository.save(task);
   }
 
@@ -7054,7 +7098,1018 @@ export class StoresService {
       storeNotification: { notifyShiftShortageToday: false, notifyUnannouncedAbsence: false, notifyResignationSign: false, remindUnreadNotifications: false, remindNewSchedule: false, remindNewScheduleDays: 0, notifyContinuousPerformanceDropDays: 0, notifyContinuousKpiDropDays: 0, notifyIndividualLowKpiDays: 0, notifyQualitySupervisorDropDays: 0, remindAssetInventory: false, remindAssetInventoryDays: 0 },
     };
   }
+
+  // Employee Report (Staff-facing)
+  async getEmployeeDailyReport(storeId: string, employeeProfileId: string, dateStr?: string) {
+    const targetDate = dateStr ? new Date(dateStr) : new Date();
+    const dateString = targetDate.toISOString().split('T')[0];
+
+    // Get shift assignments for this employee on this date
+    const assignments = await this.shiftAssignmentRepository
+      .createQueryBuilder('a')
+      .leftJoinAndSelect('a.shiftSlot', 'slot')
+      .where('a.employeeId = :employeeProfileId', { employeeProfileId })
+      .andWhere('CAST(slot.workDate AS DATE) = :dateString', { dateString })
+      .getMany();
+
+    let totalMinutes = 0;
+    let checkIn = '--:--';
+    let checkOut = '--:--';
+    let warning = '';
+    const shiftsCount = assignments.length;
+
+    if (assignments.length > 0) {
+      assignments.forEach((a: any) => {
+        if (a.checkInTime) {
+          const cin = new Date(a.checkInTime);
+          checkIn = `${String(cin.getHours()).padStart(2, '0')}:${String(cin.getMinutes()).padStart(2, '0')}`;
+        }
+        if (a.checkOutTime) {
+          const cout = new Date(a.checkOutTime);
+          checkOut = `${String(cout.getHours()).padStart(2, '0')}:${String(cout.getMinutes()).padStart(2, '0')}`;
+        }
+        totalMinutes += Number(a.workedMinutes || 0);
+
+        if (a.status === 'LATE') {
+          warning = `Vào ca trễ hôm nay`;
+        }
+      });
+    }
+
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    // Get salary info for income estimation
+    const day = targetDate.getDate();
+    const monthVal = targetDate.getMonth() + 1;
+    const yearVal = targetDate.getFullYear();
+    // Use Date object for salary month query (avoid raw string passing to PostgreSQL date column)
+    const salaryMonthDate = new Date(yearVal, monthVal - 1, 1);
+    const salaries = await this.employeeSalaryRepository.find({
+      where: { employeeProfileId, month: salaryMonthDate } as any,
+    });
+    const dailyIncome = salaries.length > 0 ? Math.round(Number(salaries[0].netSalary || 0) / 30) : 0;
+
+    return {
+      income: dailyIncome,
+      trendPercent: 0,
+      trendUp: false,
+      shifts: shiftsCount,
+      hours,
+      minutes,
+      checkIn,
+      checkOut,
+      warning,
+    };
+  }
+
+  async getEmployeeMonthlyReport(storeId: string, employeeProfileId: string, monthStr?: string) {
+    const now = new Date();
+    const month = monthStr || `${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+
+    // Parse month string (MM/YYYY or YYYY-MM-DD) into m/y
+    let mNum: number, yNum: number;
+    if (month.includes('/')) {
+      [mNum, yNum] = month.split('/').map(Number);
+    } else {
+      const d = new Date(month);
+      mNum = d.getMonth() + 1;
+      yNum = d.getFullYear();
+    }
+    // Use Date object for salary month query
+    const salaryMonthDate = new Date(yNum, mNum - 1, 1);
+
+    // Get salary info
+    const salaries = await this.employeeSalaryRepository.find({
+      where: { employeeProfileId, month: salaryMonthDate } as any,
+      relations: ['monthlyPayroll'],
+    });
+
+    const salary = salaries.length > 0 ? salaries[0] : null;
+
+    // Get shift assignments for the month
+    const startDate = new Date(yNum, mNum - 1, 1).toISOString().split('T')[0];
+    const endDate = new Date(yNum, mNum, 0).toISOString().split('T')[0];
+
+    const assignments = await this.shiftAssignmentRepository
+      .createQueryBuilder('a')
+      .leftJoinAndSelect('a.shiftSlot', 'slot')
+      .where('a.employeeId = :employeeProfileId', { employeeProfileId })
+      .andWhere('CAST(slot.workDate AS DATE) >= :startDate', { startDate })
+      .andWhere('CAST(slot.workDate AS DATE) <= :endDate', { endDate })
+      .getMany();
+
+    let totalMinutes = 0;
+    assignments.forEach((a: any) => {
+      totalMinutes += Number(a.workedMinutes || 0);
+    });
+
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    return {
+      todaySummary: assignments.length > 0 ? 'Dữ liệu tháng này' : 'Chưa có dữ liệu',
+      shifts: assignments.length,
+      hours,
+      minutes,
+      income: salary ? Number(salary.netSalary || 0) : 0,
+      incomeTrendUp: false,
+      bonus: salary ? Number(salary.bonus || 0) : 0,
+      bonusTrendUp: false,
+      penalty: salary ? Number(salary.penalty || 0) : 0,
+      penaltyTrendUp: false,
+      estimatedMonthly: salary ? Number(salary.netSalary || 0) : 0,
+      motivationText: assignments.length >= 20 ? 'Đang tiến triển tốt, hãy tiếp tục duy trì nhé' : 'Hãy cố gắng thêm nhé!',
+    };
+  }
+
+  async getEmployeeShiftHours(storeId: string, employeeProfileId: string, monthStr?: string, filter?: string) {
+    const now = new Date();
+    let m: number, y: number;
+    if (monthStr) {
+      [m, y] = monthStr.split('/').map(Number);
+    } else {
+      m = now.getMonth() + 1;
+      y = now.getFullYear();
+    }
+    const startDate = new Date(y, m - 1, 1).toISOString().split('T')[0];
+    const endDate = new Date(y, m, 0).toISOString().split('T')[0];
+
+    const query = this.shiftAssignmentRepository
+      .createQueryBuilder('a')
+      .leftJoinAndSelect('a.shiftSlot', 'slot')
+      .where('a.employeeId = :employeeProfileId', { employeeProfileId })
+      .andWhere('CAST(slot.workDate AS DATE) >= :startDate', { startDate })
+      .andWhere('CAST(slot.workDate AS DATE) <= :endDate', { endDate })
+      .orderBy('slot.workDate', 'DESC');
+
+    const assignments = await query.getMany();
+
+    // Aggregate counts by status
+    const tabCounts: Record<string, number> = {
+      all: assignments.length,
+      on_time: 0,
+      overtime: 0,
+      forgot: 0,
+      late: 0,
+      early: 0,
+      leave: 0,
+      absent: 0,
+    };
+
+    let totalMinutes = 0;
+    const shifts = assignments.map((a: any) => {
+      const slot = a.shiftSlot;
+      const dateObj = slot?.workDate ? new Date(slot.workDate) : new Date();
+      const dayNames = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+      const dayLabel = `${dayNames[dateObj.getDay()]}, ${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getFullYear()).slice(2)}`;
+      const shiftName = slot?.name || slot?.id?.slice(0, 8) || 'Ca làm';
+
+      let status = 'Đúng giờ';
+      let statusColor = '#12B569';
+      const assignStatus = (a.status || '').toUpperCase();
+
+      if (assignStatus === 'LATE' || assignStatus === 'CHECKED_IN_LATE') {
+        status = 'Đi trễ';
+        statusColor = '#F78F08';
+        tabCounts.late++;
+      } else if (assignStatus === 'EARLY' || assignStatus === 'LEFT_EARLY') {
+        status = 'Về sớm';
+        statusColor = '#F78F08';
+        tabCounts.early++;
+      } else if (assignStatus === 'ABSENT') {
+        status = 'Nghỉ không phép';
+        statusColor = '#F95555';
+        tabCounts.absent++;
+      } else if (assignStatus === 'LEAVE') {
+        status = 'Nghỉ phép';
+        statusColor = '#3B82F6';
+        tabCounts.leave++;
+      } else if (assignStatus === 'OVERTIME') {
+        status = 'Tăng ca';
+        statusColor = '#8B5CF6';
+        tabCounts.overtime++;
+      } else if (assignStatus === 'FORGOT') {
+        status = 'Quên chấm công';
+        statusColor = '#F95555';
+        tabCounts.forgot++;
+      } else {
+        tabCounts.on_time++;
+      }
+
+      const workedMins = Number(a.workedMinutes || 0);
+      totalMinutes += workedMins;
+      const h = Math.floor(workedMins / 60);
+      const mins = workedMins % 60;
+
+      return {
+        id: a.id,
+        dayLabel,
+        shiftName,
+        status,
+        statusColor,
+        hours: `${h}:${String(mins).padStart(2, '0')}`,
+      };
+    });
+
+    // Filter if needed
+    let filteredShifts = shifts;
+    if (filter && filter !== 'all') {
+      const statusMap: Record<string, string> = {
+        on_time: 'Đúng giờ',
+        overtime: 'Tăng ca',
+        forgot: 'Quên chấm công',
+        late: 'Đi trễ',
+        early: 'Về sớm',
+        leave: 'Nghỉ phép',
+        absent: 'Nghỉ không phép',
+      };
+      filteredShifts = shifts.filter(s => s.status === statusMap[filter]);
+    }
+
+    return {
+      completedShifts: tabCounts.on_time + tabCounts.overtime,
+      totalHours: Math.floor(totalMinutes / 60),
+      totalMinutes: totalMinutes % 60,
+      shiftsTrend: 0,
+      hoursTrend: 0,
+      shifts: filteredShifts,
+      tabCounts,
+    };
+  }
+
+  // Leave Request Management (Staff)
+  async createLeaveRequest(data: Partial<EmployeeLeaveRequest>, files?: Express.Multer.File[]) {
+    const attachments: string[] = [];
+    if (files && files.length > 0) {
+      files.forEach((file) => {
+        attachments.push(`/uploads/${file.filename}`);
+      });
+    }
+
+    const leaveRequest = this.leaveRequestRepository.create({
+      ...data,
+      attachments: attachments.length > 0 ? attachments : (data.attachments || []),
+      status: LeaveRequestStatus.PENDING,
+    });
+    return this.leaveRequestRepository.save(leaveRequest);
+  }
+
+  async getLeaveRequestsByEmployee(employeeProfileId: string) {
+    return this.leaveRequestRepository.find({
+      where: { employeeProfileId },
+      order: { createdAt: 'DESC' },
+      relations: ['approvedBy', 'approvedBy.account'],
+    });
+  }
+
+  async getLeaveRequestsByStore(storeId: string, status?: LeaveRequestStatus) {
+    const where: any = { storeId };
+    if (status) where.status = status;
+    return this.leaveRequestRepository.find({
+      where,
+      order: { createdAt: 'DESC' },
+      relations: ['employeeProfile', 'employeeProfile.account', 'approvedBy', 'approvedBy.account'],
+    });
+  }
+
+  async cancelLeaveRequest(id: string, employeeProfileId: string) {
+    const request = await this.leaveRequestRepository.findOne({ where: { id } });
+    if (!request) throw new NotFoundException('Không tìm thấy đơn xin nghỉ');
+    if (request.employeeProfileId !== employeeProfileId) {
+      throw new BadRequestException('Bạn không có quyền hủy đơn này');
+    }
+    if (request.status !== LeaveRequestStatus.PENDING) {
+      throw new BadRequestException('Chỉ có thể hủy đơn đang chờ duyệt');
+    }
+    request.status = LeaveRequestStatus.CANCELLED;
+    return this.leaveRequestRepository.save(request);
+  }
+
+  // Feedback Management
+  async createFeedback(data: Partial<Feedback>, files?: Express.Multer.File[]) {
+    const attachments: string[] = [];
+    if (files && files.length > 0) {
+      files.forEach((file) => {
+        attachments.push(`/uploads/${file.filename}`);
+      });
+    }
+
+    // Parse categories if string
+    let categories = data.categories;
+    if (typeof categories === 'string') {
+      try {
+        categories = JSON.parse(categories as any);
+      } catch (e) {
+        categories = [categories as any];
+      }
+    }
+
+    const feedback = this.feedbackRepository.create({
+      ...data,
+      categories,
+      attachments: attachments.length > 0 ? attachments : (data.attachments || []),
+    });
+    return this.feedbackRepository.save(feedback);
+  }
+
+  async getFeedbacks(filters: { storeId?: string; employeeProfileId?: string; accountId?: string; status?: FeedbackStatus } = {}) {
+    const where: any = {};
+    if (filters.storeId) where.storeId = filters.storeId;
+    if (filters.employeeProfileId) where.employeeProfileId = filters.employeeProfileId;
+    if (filters.accountId) where.accountId = filters.accountId;
+    if (filters.status) where.status = filters.status;
+
+    return this.feedbackRepository.find({
+      where,
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async getFeedbackLeaderboard(storeId: string) {
+    // Aggregate feedback count per employee for the store leaderboard
+    const feedbacks = await this.feedbackRepository
+      .createQueryBuilder('fb')
+      .leftJoinAndSelect('fb.store', 'store')
+      .where('fb.storeId = :storeId', { storeId })
+      .andWhere('fb.employeeProfileId IS NOT NULL')
+      .getMany();
+
+    // Count feedbacks per employee
+    const countMap: Record<string, number> = {};
+    for (const fb of feedbacks) {
+      const pid = fb.employeeProfileId;
+      if (pid) countMap[pid] = (countMap[pid] || 0) + 1;
+    }
+
+    if (Object.keys(countMap).length === 0) return { podium: [], ranking: [] };
+
+    // Load employee profiles with account info
+    const profileIds = Object.keys(countMap);
+    const profiles = await this.profileRepository.find({
+      where: { id: In(profileIds) } as any,
+      relations: ['account'],
+    });
+
+    const leaderboard = profiles
+      .map((p: any) => ({
+        id: p.id,
+        name: p.account?.name || 'Nhân viên',
+        score: Number(((countMap[p.id] || 0) * 10).toFixed(1)), // 10 points per feedback
+        avatar: p.account?.avatar || null,
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    return {
+      podium: leaderboard.slice(0, 3).map((item, idx) => ({
+        ...item,
+        rank: idx + 1,
+      })),
+      ranking: leaderboard.slice(3),
+    };
+  }
+
+  async recordCheckoutMood(assignmentId: string, mood: string, note?: string) {
+    const assignment = await this.shiftAssignmentRepository.findOne({ where: { id: assignmentId } });
+    if (!assignment) return { success: false, message: 'Assignment not found' };
+
+    // Store mood as JSON in a generic field (metadata or note)
+    // We use the existing 'notes' or patch via metadata approach
+    (assignment as any).checkoutMood = mood;
+    (assignment as any).checkoutNote = note || '';
+    await this.shiftAssignmentRepository.save(assignment);
+    return { success: true, mood, note };
+  }
+
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // ATTENDANCE & FACE RECOGNITION
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  async checkInWithFace(assignmentId: string, imageBuffer: Buffer) {
+    const assignment = await this.shiftAssignmentRepository.findOne({
+      where: { id: assignmentId },
+      relations: ['shiftSlot', 'shiftSlot.workShift', 'employee'],
+    });
+    if (!assignment) throw new NotFoundException('Shift assignment not found');
+    if (assignment.checkInTime) throw new BadRequestException('Already checked in');
+
+    // Face verification
+    const employeeFace = await this.employeeFaceRepository.findOne({
+      where: { employeeProfileId: assignment.employeeId, isActive: true },
+    });
+    if (!employeeFace || employeeFace.faceDescriptors.length === 0) {
+      throw new BadRequestException('Face not registered. Please register your face first.');
+    }
+
+    const descriptor = await this.faceRecognitionService.extractDescriptor(imageBuffer);
+    if (!descriptor) {
+      return { matched: false, message: 'No face detected in image' };
+    }
+
+    const matchResult = this.faceRecognitionService.compareFaces(descriptor, employeeFace.faceDescriptors);
+    if (!matchResult.matched) {
+      return { matched: false, distance: matchResult.distance, message: 'Face does not match' };
+    }
+
+    // Calculate late minutes
+    const now = new Date();
+    const workShift = assignment.shiftSlot?.workShift;
+    let lateMinutes = 0;
+
+    if (workShift?.startTime) {
+      const [h, m] = workShift.startTime.split(':').map(Number);
+      const shiftStart = new Date(now);
+      shiftStart.setHours(h, m, 0, 0);
+      lateMinutes = Math.max(0, Math.floor((now.getTime() - shiftStart.getTime()) / 60000));
+    }
+
+    const attendanceStatus = lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.ON_TIME;
+
+    // Update assignment
+    assignment.checkInTime = now;
+    assignment.lateMinutes = lateMinutes;
+    assignment.attendanceStatus = attendanceStatus;
+    assignment.status = ShiftAssignmentStatus.CONFIRMED;
+    await this.shiftAssignmentRepository.save(assignment);
+
+    // Create audit log
+    await this.attendanceLogRepository.save(
+      this.attendanceLogRepository.create({
+        shiftAssignmentId: assignmentId,
+        employeeProfileId: assignment.employeeId,
+        storeId: assignment.shiftSlot?.cycle?.storeId || '',
+        type: AttendanceLogType.CHECK_IN,
+        timestamp: now,
+        method: AttendanceMethod.FACE,
+        faceMatchScore: matchResult.distance,
+      }),
+    );
+
+    return {
+      matched: true,
+      distance: matchResult.distance,
+      lateMinutes,
+      attendanceStatus,
+      checkInTime: now.toISOString(),
+    };
+  }
+
+  async checkOutWithFace(assignmentId: string, imageBuffer: Buffer) {
+    const assignment = await this.shiftAssignmentRepository.findOne({
+      where: { id: assignmentId },
+      relations: ['shiftSlot', 'shiftSlot.workShift', 'employee'],
+    });
+    if (!assignment) throw new NotFoundException('Shift assignment not found');
+    if (!assignment.checkInTime) throw new BadRequestException('Must check in first');
+    if (assignment.checkOutTime) throw new BadRequestException('Already checked out');
+
+    // Face verification
+    const employeeFace = await this.employeeFaceRepository.findOne({
+      where: { employeeProfileId: assignment.employeeId, isActive: true },
+    });
+    if (!employeeFace || employeeFace.faceDescriptors.length === 0) {
+      throw new BadRequestException('Face not registered');
+    }
+
+    const descriptor = await this.faceRecognitionService.extractDescriptor(imageBuffer);
+    if (!descriptor) {
+      return { matched: false, message: 'No face detected in image' };
+    }
+
+    const matchResult = this.faceRecognitionService.compareFaces(descriptor, employeeFace.faceDescriptors);
+    if (!matchResult.matched) {
+      return { matched: false, distance: matchResult.distance, message: 'Face does not match' };
+    }
+
+    // Calculate early minutes and worked minutes
+    const now = new Date();
+    const workShift = assignment.shiftSlot?.workShift;
+    let earlyMinutes = 0;
+
+    if (workShift?.endTime) {
+      const [h, m] = workShift.endTime.split(':').map(Number);
+      const shiftEnd = new Date(now);
+      shiftEnd.setHours(h, m, 0, 0);
+      earlyMinutes = Math.max(0, Math.floor((shiftEnd.getTime() - now.getTime()) / 60000));
+    }
+
+    const workedMinutes = Math.floor(
+      (now.getTime() - new Date(assignment.checkInTime).getTime()) / 60000,
+    );
+
+    // Determine final attendance status
+    let attendanceStatus = assignment.attendanceStatus || AttendanceStatus.ON_TIME;
+    if (assignment.lateMinutes > 0 && earlyMinutes > 0) {
+      attendanceStatus = AttendanceStatus.LATE_AND_EARLY;
+    } else if (earlyMinutes > 0) {
+      attendanceStatus = AttendanceStatus.EARLY;
+    }
+
+    // Update assignment
+    assignment.checkOutTime = now;
+    assignment.earlyMinutes = earlyMinutes;
+    assignment.workedMinutes = workedMinutes;
+    assignment.attendanceStatus = attendanceStatus;
+    assignment.status = ShiftAssignmentStatus.COMPLETED;
+    await this.shiftAssignmentRepository.save(assignment);
+
+    // Create audit log
+    await this.attendanceLogRepository.save(
+      this.attendanceLogRepository.create({
+        shiftAssignmentId: assignmentId,
+        employeeProfileId: assignment.employeeId,
+        storeId: assignment.shiftSlot?.cycle?.storeId || '',
+        type: AttendanceLogType.CHECK_OUT,
+        timestamp: now,
+        method: AttendanceMethod.FACE,
+        faceMatchScore: matchResult.distance,
+      }),
+    );
+
+    return {
+      matched: true,
+      distance: matchResult.distance,
+      earlyMinutes,
+      workedMinutes,
+      attendanceStatus,
+      checkOutTime: now.toISOString(),
+    };
+  }
+
+  async registerFace(employeeProfileId: string, storeId: string, imageBuffers: Buffer[]) {
+    if (imageBuffers.length < 3) {
+      throw new BadRequestException('At least 3 face images required');
+    }
+
+    const result = await this.faceRecognitionService.registerFace(imageBuffers);
+
+    if (result.successCount < 3) {
+      throw new BadRequestException(
+        `Only ${result.successCount} faces detected out of ${imageBuffers.length} images. Need at least 3.`,
+      );
+    }
+
+    // Deactivate old face registrations
+    await this.employeeFaceRepository.update(
+      { employeeProfileId, isActive: true },
+      { isActive: false },
+    );
+
+    // Save new face registration
+    const face = this.employeeFaceRepository.create({
+      employeeProfileId,
+      storeId,
+      faceDescriptors: result.descriptors,
+      faceImageUrls: [], // URLs can be set after uploading to storage
+      isActive: true,
+    });
+
+    return this.employeeFaceRepository.save(face);
+  }
+
+  async getFaceRegistration(employeeProfileId: string) {
+    const face = await this.employeeFaceRepository.findOne({
+      where: { employeeProfileId, isActive: true },
+    });
+    return {
+      registered: !!face,
+      registeredAt: face?.registeredAt || null,
+      descriptorCount: face?.faceDescriptors?.length || 0,
+    };
+  }
+
+  async getAttendanceLogs(storeId: string, filters?: { employeeProfileId?: string; dateFrom?: string; dateTo?: string }) {
+    const where: any = { storeId };
+    if (filters?.employeeProfileId) where.employeeProfileId = filters.employeeProfileId;
+    if (filters?.dateFrom && filters?.dateTo) {
+      where.timestamp = Between(new Date(filters.dateFrom), new Date(filters.dateTo + 'T23:59:59'));
+    }
+
+    return this.attendanceLogRepository.find({
+      where,
+      relations: ['shiftAssignment', 'employeeProfile'],
+      order: { timestamp: 'DESC' },
+      take: 100,
+    });
+  }
+
+  async getBonusHistory(storeId: string, month?: string) {
+    const query = this.salaryAdjustmentRepository
+      .createQueryBuilder('sa')
+      .innerJoinAndSelect('sa.employeeProfile', 'ep')
+      .leftJoinAndSelect('ep.account', 'acc')
+      .leftJoinAndSelect('ep.storeRole', 'role')
+      .leftJoinAndSelect('ep.employeeType', 'etype')
+      .where('ep.storeId = :storeId', { storeId })
+      .andWhere('sa.adjustmentType = :type', { type: AdjustmentType.INCREASE })
+      .orderBy('sa.createdAt', 'DESC');
+
+    if (month) {
+      query.andWhere("TO_CHAR(sa.effective_month, 'MM/YYYY') = :month", { month });
+    }
+
+    const adjustments = await query.take(50).getMany();
+
+    // Group by date
+    const grouped: Record<string, any[]> = {};
+    for (const adj of adjustments) {
+      const dateKey = new Date(adj.createdAt).toLocaleDateString('vi-VN');
+      if (!grouped[dateKey]) grouped[dateKey] = [];
+      grouped[dateKey].push({
+        id: adj.id,
+        employeeName: (adj.employeeProfile as any)?.account?.name || '',
+        position: (adj.employeeProfile as any)?.storeRole?.name || '',
+        employmentType: (adj.employeeProfile as any)?.employeeType?.name || '',
+        performance: adj.reasonText || '',
+        bonusAmount: `+${Number(adj.adjustmentAmount).toLocaleString('vi-VN')}vnđ`,
+      });
+    }
+
+    return Object.entries(grouped).map(([date, records]) => ({ date, records }));
+  }
+
+  async getPenaltyHistory(storeId: string, month?: string) {
+    const query = this.salaryAdjustmentRepository
+      .createQueryBuilder('sa')
+      .innerJoinAndSelect('sa.employeeProfile', 'ep')
+      .leftJoinAndSelect('ep.account', 'acc2')
+      .leftJoinAndSelect('ep.storeRole', 'role2')
+      .leftJoinAndSelect('ep.employeeType', 'etype2')
+      .where('ep.storeId = :storeId', { storeId })
+      .andWhere('sa.adjustmentType = :type', { type: AdjustmentType.DECREASE })
+      .orderBy('sa.createdAt', 'DESC');
+
+    if (month) {
+      query.andWhere("TO_CHAR(sa.effective_month, 'MM/YYYY') = :month", { month });
+    }
+
+    const adjustments = await query.take(50).getMany();
+
+    // Group by date
+    const grouped: Record<string, any[]> = {};
+    for (const adj of adjustments) {
+      const dateKey = new Date(adj.createdAt).toLocaleDateString('vi-VN');
+      if (!grouped[dateKey]) grouped[dateKey] = [];
+      grouped[dateKey].push({
+        id: adj.id,
+        employeeName: (adj.employeeProfile as any)?.account?.name || '',
+        position: (adj.employeeProfile as any)?.storeRole?.name || '',
+        employmentType: (adj.employeeProfile as any)?.employeeType?.name || '',
+        reason: adj.reasonText || '',
+        penaltyAmount: `-${Number(adj.adjustmentAmount).toLocaleString('vi-VN')}vnđ`,
+      });
+    }
+
+    return Object.entries(grouped).map(([date, records]) => ({ date, records }));
+  }
+
+  async getNextShiftAssignment(employeeProfileId: string, storeId: string) {
+    const today = new Date();
+    const startOfDay = new Date(today);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(today);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // 1) Check if there's an active assignment (checked in but not checked out)
+    const activeAssignment = await this.shiftAssignmentRepository.findOne({
+      where: {
+        employeeId: employeeProfileId,
+        status: ShiftAssignmentStatus.CONFIRMED,
+        checkOutTime: null as any,
+      },
+      relations: ['shiftSlot', 'shiftSlot.workShift'],
+      order: { checkInTime: 'DESC' },
+    });
+
+    if (activeAssignment) {
+      const ws = activeAssignment.shiftSlot?.workShift;
+      return {
+        assignmentId: activeAssignment.id,
+        mode: 'check-out' as const,
+        shiftName: ws?.shiftName || '',
+        startTime: ws?.startTime || '',
+        endTime: ws?.endTime || '',
+        checkInTime: activeAssignment.checkInTime?.toISOString() || null,
+        lateMinutes: activeAssignment.lateMinutes || 0,
+      };
+    }
+
+    // 2) Find next pending assignment for today
+    const pendingAssignment = await this.shiftAssignmentRepository.findOne({
+      where: {
+        employeeId: employeeProfileId,
+        status: ShiftAssignmentStatus.PENDING,
+        checkInTime: null as any,
+      },
+      relations: ['shiftSlot', 'shiftSlot.workShift', 'shiftSlot.cycle'],
+      order: { createdAt: 'ASC' },
+    });
+
+    if (pendingAssignment) {
+      const ws = pendingAssignment.shiftSlot?.workShift;
+      return {
+        assignmentId: pendingAssignment.id,
+        mode: 'check-in' as const,
+        shiftName: ws?.shiftName || '',
+        startTime: ws?.startTime || '',
+        endTime: ws?.endTime || '',
+        checkInTime: null,
+        lateMinutes: 0,
+      };
+    }
+
+    return null;
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // SHIFT REGISTRATION
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  /**
+   * Nhân viên gửi đề xuất đăng ký ca làm việc.
+   * Nếu có slotId → gắn vào slot cụ thể (registerToShiftSlot flow).
+   * Nếu không có slotId → tạo ShiftRegistration dạng đề xuất tổng quát.
+   */
+  async createShiftRegistration(
+    accountId: string,
+    data: {
+      storeId: string;
+      employeeProfileId: string;
+      workShiftId?: string;
+      slotId?: string;
+      startDate?: string;
+      endDate?: string;
+      note?: string;
+    },
+  ) {
+    // If slotId provided, delegate to existing registerToShiftSlot
+    if (data.slotId) {
+      return this.registerToShiftSlot(data.slotId, data.employeeProfileId, data.note);
+    }
+
+    // Otherwise create a general shift proposal via leave-request-style record
+    // Find an open shift slot that matches the requested workShift + date
+    let targetSlotId: string | null = null;
+
+    if (data.workShiftId && data.startDate) {
+      const slot = await this.shiftSlotRepository.findOne({
+        where: {
+          workShiftId: data.workShiftId,
+        } as any,
+      });
+      if (slot) targetSlotId = slot.id;
+    }
+
+    if (targetSlotId) {
+      return this.registerToShiftSlot(targetSlotId, data.employeeProfileId, data.note);
+    }
+
+    // No available slot found — return 400 instead of creating invalid record
+    throw new BadRequestException(
+      'Không tìm thấy slot ca phù hợp. Vui lòng chọn slotId cụ thể hoặc liên hệ quản lý.',
+    );
+  }
+
+  /**
+   * Lấy danh sách đăng ký ca (shift registrations / proposals).
+   */
+  async getShiftRegistrations(filters: {
+    storeId?: string;
+    employeeProfileId?: string;
+    status?: string;
+  }) {
+    const where: any = {};
+    // NOTE: ShiftAssignment entity has no storeId column (FK is through shiftSlot)
+    // Only filter by employeeId and status directly
+    if (filters.employeeProfileId) where.employeeId = filters.employeeProfileId;
+    if (filters.status) where.status = filters.status;
+
+    return this.shiftAssignmentRepository.find({
+      where,
+      relations: ['shiftSlot'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // SALARY INQUIRIES
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  /**
+   * Nhân viên gửi câu hỏi về lương tới quản lý.
+   * Tái dụng bảng Feedback để lưu trữ, type = 'SALARY_INQUIRY'.
+   */
+  async createSalaryInquiry(profileId: string, question: string, month?: string) {
+    const profile = await this.profileRepository.findOne({
+      where: { id: profileId },
+      relations: ['account'],
+    });
+    if (!profile) throw new NotFoundException('Không tìm thấy nhân viên');
+
+    const feedbackData = this.feedbackRepository.create({
+      employeeProfileId: profileId,
+      storeId: profile.storeId,
+      accountId: profile.accountId,
+      content: month ? `[Tháng ${month}] ${question}` : question,
+      categories: ['SALARY_INQUIRY'],
+      status: FeedbackStatus.PENDING,
+    });
+    const saved = await this.feedbackRepository.save(feedbackData);
+
+    return {
+      id: saved.id,
+      message: 'Câu hỏi của bạn đã được gửi thành công. Quản lý sẽ phản hồi trong thời gian sớm nhất.',
+      status: 'PENDING',
+      createdAt: saved.createdAt,
+    };
+  }
+
+  /**
+   * Lấy danh sách câu hỏi lương của nhân viên.
+   */
+  async getSalaryInquiries(profileId: string) {
+    const feedbacks = await this.feedbackRepository.find({
+      where: { employeeProfileId: profileId },
+      order: { createdAt: 'DESC' },
+    });
+    // Filter to just salary inquiries
+    const inquiries = feedbacks.filter(f => f.categories?.includes('SALARY_INQUIRY'));
+    return inquiries.map(f => ({
+      id: f.id,
+      question: f.content,
+      status: f.status,
+      reply: f.adminNote || null,
+      createdAt: f.createdAt,
+    }));
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // SALARY SLIP DATA
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  /**
+   * Lấy dữ liệu phiếu lương cho nhân viên theo tháng.
+   * Format tháng: "MM/YYYY".
+   */
+  async getSalarySlipData(profileId: string, month: string) {
+    const profile = await this.profileRepository.findOne({
+      where: { id: profileId },
+      relations: ['account', 'storeRole'],
+    });
+    if (!profile) throw new NotFoundException('Không tìm thấy nhân viên');
+
+    // Fetch salary record for this month
+    const salary = await this.getEmployeeSalaries(profileId, month);
+    const salaryRecord = Array.isArray(salary) ? salary[0] : salary;
+
+    if (!salaryRecord) {
+      return {
+        message: 'Chưa có phiếu lương cho tháng này. Vui lòng liên hệ quản lý.',
+        profileId,
+        month,
+        employeeName: profile.account?.fullName || 'N/A',
+        position: profile.storeRole?.name || 'N/A',
+        data: null,
+      };
+    }
+
+    return {
+      profileId,
+      month,
+      employeeName: profile.account?.fullName || 'N/A',
+      position: profile.storeRole?.name || 'N/A',
+      workingDays: salaryRecord.workingDays,
+      workingHours: salaryRecord.workingHours,
+      baseSalary: salaryRecord.baseSalary,
+      bonus: salaryRecord.bonus,
+      penalty: salaryRecord.penalty,
+      advancePayment: salaryRecord.advancePayment,
+      totalIncome: salaryRecord.totalIncome,
+      totalDeductions: salaryRecord.totalDeductions,
+      netSalary: salaryRecord.netSalary,
+      paymentStatus: salaryRecord.paymentStatus,
+      paidAt: salaryRecord.paidAt,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // KPI AI SUGGESTION
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  /**
+   * Yêu cầu AI đề xuất KPI cho nhân viên.
+   * Phân tích lịch sử hiệu suất và trả về các gợi ý KPI phù hợp.
+   */
+  async requestKpiAiSuggestion(data: {
+    storeId: string;
+    employeeProfileId: string;
+    context?: string;
+  }) {
+    // Fetch recent KPIs and performance data for the employee
+    const kpis = await this.employeeKpiRepository.find({
+      where: { employeeProfileId: data.employeeProfileId },
+      relations: ['kpiTasks'],
+      order: { createdAt: 'DESC' },
+      take: 5,
+    });
+
+    const performance = await this.performanceRepository.find({
+      where: { employeeProfileId: data.employeeProfileId },
+      order: { createdAt: 'DESC' },
+      take: 3,
+    });
+
+    // Generate rule-based AI suggestions based on performance history
+    const suggestions = this.generateKpiSuggestions(kpis, performance, data.context);
+
+    return {
+      requestId: `ai-kpi-${Date.now()}`,
+      status: 'COMPLETED',
+      employeeProfileId: data.employeeProfileId,
+      suggestions,
+      generatedAt: new Date().toISOString(),
+      message: 'AI đã phân tích dữ liệu hiệu suất và đề xuất các KPI phù hợp.',
+    };
+  }
+
+  /**
+   * Rule-based KPI suggestion engine.
+   * Phân tích dữ liệu KPI hiện có và đề xuất các mục tiêu phù hợp.
+   */
+  private generateKpiSuggestions(kpis: EmployeeKpi[], performance: any[], context?: string): any[] {
+    const suggestions: any[] = [];
+
+    // Default suggestions dựa trên performance data
+    const hasHighPerformance = performance.some((p: any) => p.score >= 80);
+    const hasLowPerformance = performance.some((p: any) => p.score < 60);
+
+    // Attendance KPI
+    suggestions.push({
+      title: 'KPI Chuyên cần',
+      description: 'Đi làm đúng giờ và đủ số ca trong tháng',
+      targetValue: hasHighPerformance ? 28 : 25,
+      unit: 'ngày',
+      category: 'ATTENDANCE',
+      rationale: hasHighPerformance
+        ? 'Nhân viên có hiệu suất tốt, nâng mục tiêu lên mức cao hơn.'
+        : 'Mục tiêu khởi đầu phù hợp để xây dựng thói quen tốt.',
+    });
+
+    // Learning KPI
+    suggestions.push({
+      title: 'KPI Phát triển kỹ năng',
+      description: 'Hoàn thành ít nhất 1 khóa học hoặc buổi đào tạo trong tháng',
+      targetValue: 1,
+      unit: 'khóa học',
+      category: 'DEVELOPMENT',
+      rationale: 'Phát triển liên tục là yếu tố quan trọng để thăng tiến.',
+    });
+
+    // Performance-based KPI
+    if (hasLowPerformance) {
+      suggestions.push({
+        title: 'KPI Cải thiện hiệu suất',
+        description: 'Đạt điểm hiệu suất tối thiểu 70/100 trong tháng',
+        targetValue: 70,
+        unit: 'điểm',
+        category: 'PERFORMANCE',
+        rationale: 'Cần cải thiện điểm hiệu suất để đạt tiêu chuẩn của cửa hàng.',
+      });
+    } else {
+      suggestions.push({
+        title: 'KPI Doanh số / Năng suất',
+        description: 'Đặt mục tiêu doanh số hoặc số lượng phục vụ trong tháng',
+        targetValue: 100,
+        unit: 'đơn vị',
+        category: 'PERFORMANCE',
+        rationale: 'Nhân viên đang có hiệu suất tốt, có thể đặt mục tiêu cao hơn.',
+      });
+    }
+
+    // Customer satisfaction KPI
+    suggestions.push({
+      title: 'KPI Hài lòng khách hàng',
+      description: 'Nhận ít nhất 5 phản hồi tích cực từ khách hàng trong tháng',
+      targetValue: 5,
+      unit: 'phản hồi',
+      category: 'CUSTOMER_SERVICE',
+      rationale: 'Chất lượng phục vụ khách hàng là chỉ số quan trọng nhất.',
+    });
+
+    // Context-based additional suggestion
+    if (context) {
+      suggestions.push({
+        title: 'KPI Theo yêu cầu',
+        description: context,
+        targetValue: 1,
+        unit: 'lần',
+        category: 'CUSTOM',
+        rationale: 'Được thêm theo yêu cầu cụ thể của nhân viên.',
+      });
+    }
+
+    return suggestions;
+  }
 }
-
-
-

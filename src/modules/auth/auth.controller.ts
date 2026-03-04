@@ -46,7 +46,7 @@ export class AuthController {
     if (!user) {
       throw new UnauthorizedException('Email/Số điện thoại hoặc mật khẩu không đúng');
     }
-    return this.authService.login(user);
+    return this.authService.login(user, body.appType || 'OWNER_APP');
   }
 
   @Post('register')
