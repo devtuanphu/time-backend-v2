@@ -124,9 +124,10 @@ export class ZaloService implements OnModuleInit {
       tokenRecord.accessTokenExpiresAt = new Date(
         Date.now() + expiresInSeconds * 1000,
       );
-      // Refresh token có hiệu lực 30 ngày
+      // Refresh token có hiệu lực 90 ngày (Zalo policy as of 2025)
+      // Dùng 85 ngày để có buffer an toàn
       tokenRecord.refreshTokenExpiresAt = new Date(
-        Date.now() + 30 * 24 * 60 * 60 * 1000,
+        Date.now() + 85 * 24 * 60 * 60 * 1000,
       );
 
       await this.zaloTokenRepository.save(tokenRecord);
@@ -140,11 +141,12 @@ export class ZaloService implements OnModuleInit {
   }
 
   /**
-   * Scheduled job: Tự động refresh token MỖI 12 GIỜ
+   * Scheduled job: Tự động refresh token MỖI 6 GIỜ
    * Đảm bảo refresh_token luôn được renew (Zalo cấp refresh token mới mỗi lần refresh)
    * Nếu server chạy liên tục, token sẽ KHÔNG BAO GIỜ hết hạn
+   * Có lock để tránh race condition khi PM2 chạy nhiều instance
    */
-  @Cron('0 */12 * * *') // Mỗi 12 giờ (0h và 12h trưa)
+  @Cron('0 */6 * * *') // Mỗi 6 giờ
   async keepAliveToken() {
     this.logger.log('⏰ [Cron] Bắt đầu keep-alive token...');
     
@@ -162,7 +164,15 @@ export class ZaloService implements OnModuleInit {
       // Kiểm tra refresh token còn hạn không
       const now = new Date();
       if (tokenRecord.refreshTokenExpiresAt.getTime() <= now.getTime()) {
-        this.logger.error('[Cron] Refresh token đã hết hạn! Cần authorize lại.');
+        this.logger.error('[Cron] ⚠️ Refresh token đã hết hạn! Cần authorize lại qua GET /zalo/oauth-url');
+        return;
+      }
+
+      // Lock: Nếu token đã được refresh trong 5 giờ gần đây → skip
+      // (tránh race condition khi PM2 chạy nhiều instance cùng refresh)
+      const fiveHoursAgo = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+      if (tokenRecord.updatedAt && tokenRecord.updatedAt.getTime() > fiveHoursAgo.getTime()) {
+        this.logger.log('[Cron] Token đã được refresh gần đây, skip.');
         return;
       }
 
@@ -185,7 +195,7 @@ export class ZaloService implements OnModuleInit {
       accessToken,
       refreshToken,
       accessTokenExpiresAt: new Date(Date.now() + expiresIn * 1000),
-      refreshTokenExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      refreshTokenExpiresAt: new Date(Date.now() + 85 * 24 * 60 * 60 * 1000),
     });
 
     await this.zaloTokenRepository.save(tokenEntity);
