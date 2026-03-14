@@ -1575,6 +1575,11 @@ export class StoresService {
   }
 
   async getEmployees(ownerId: string, storeId?: string, typeName?: string, isDeleted: boolean = false) {
+    // Guard: nếu storeId là 'undefined' hoặc không phải UUID hợp lệ → trả kết quả rỗng
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (storeId && !uuidRegex.test(storeId)) {
+      return { employees: [], summary: { onTimeCount: 0, authorizedLeaveCount: 0, lateArrivalCount: 0, unauthorizedLeaveCount: 0 }, typeCounts: [{ name: 'All', count: 0 }] };
+    }
     const contextWhere: any = {};
     if (storeId) {
       contextWhere.storeId = storeId;
@@ -7819,7 +7824,7 @@ export class StoresService {
       };
     }
 
-    return null;
+    return { mode: 'none', assignmentId: null, shiftName: null, startTime: null, endTime: null, checkInTime: null, lateMinutes: 0 };
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -409,6 +409,51 @@ export class StoresController {
     return this.storesService.getShiftRegistrations({ storeId, employeeProfileId, status });
   }
 
+  // KPI Task Management (MUST be above @Get(':id') to avoid route collision)
+  @Post('kpi-tasks')
+  @ApiOperation({ summary: 'Thêm nhiệm vụ vào bảng KPI' })
+  async createKpiTask(@Body() body: any) {
+    return this.storesService.createKpiTask(body);
+  }
+
+  @Patch('kpi-tasks/:id/progress')
+  @ApiOperation({ summary: 'Cập nhật tiến độ nhiệm vụ KPI' })
+  async updateKpiTaskProgress(
+    @Param('id') id: string,
+    @Body('actualValue') actualValue: number,
+  ) {
+    return this.storesService.updateKpiTaskProgress(id, actualValue);
+  }
+
+  @Get('kpi-tasks')
+  @ApiOperation({ summary: 'Lấy danh sách nhiệm vụ KPI' })
+  @ApiQuery({ name: 'employeeKpiId', required: false })
+  @ApiQuery({ name: 'storeId', required: false })
+  @ApiQuery({ name: 'isHidden', required: false, type: Boolean })
+  async getKpiTasks(
+    @Query('employeeKpiId') employeeKpiId?: string,
+    @Query('storeId') storeId?: string,
+    @Query('isHidden') isHidden?: string,
+  ) {
+    return this.storesService.getKpiTasks({
+      employeeKpiId,
+      storeId,
+      isHidden: isHidden === 'true' ? true : isHidden === 'false' ? false : undefined,
+    });
+  }
+
+  @Delete('kpi-tasks/:id')
+  @ApiOperation({ summary: 'Xóa nhiệm vụ KPI' })
+  async deleteKpiTask(@Param('id') id: string) {
+    return this.storesService.deleteKpiTask(id);
+  }
+
+  @Patch('kpi-tasks/:id/hide')
+  @ApiOperation({ summary: 'Ẩn nhiệm vụ KPI' })
+  async hideKpiTask(@Param('id') id: string) {
+    return this.storesService.hideKpiTask(id);
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Lấy thông tin chi tiết cửa hàng',
@@ -2243,50 +2288,7 @@ export class StoresController {
 
 
 
-  // KPI Task Management
-  @Post('kpi-tasks')
-  @ApiOperation({ summary: 'Thêm nhiệm vụ vào bảng KPI' })
-  async createKpiTask(@Body() body: any) {
-    return this.storesService.createKpiTask(body);
-  }
 
-  @Patch('kpi-tasks/:id/progress')
-  @ApiOperation({ summary: 'Cập nhật tiến độ nhiệm vụ KPI' })
-  async updateKpiTaskProgress(
-    @Param('id') id: string,
-    @Body('actualValue') actualValue: number,
-  ) {
-    return this.storesService.updateKpiTaskProgress(id, actualValue);
-  }
-
-  @Get('kpi-tasks')
-  @ApiOperation({ summary: 'Lấy danh sách nhiệm vụ KPI' })
-  @ApiQuery({ name: 'employeeKpiId', required: false })
-  @ApiQuery({ name: 'storeId', required: false })
-  @ApiQuery({ name: 'isHidden', required: false, type: Boolean })
-  async getKpiTasks(
-    @Query('employeeKpiId') employeeKpiId?: string,
-    @Query('storeId') storeId?: string,
-    @Query('isHidden') isHidden?: string,
-  ) {
-    return this.storesService.getKpiTasks({
-      employeeKpiId,
-      storeId,
-      isHidden: isHidden === 'true' ? true : isHidden === 'false' ? false : undefined,
-    });
-  }
-
-  @Delete('kpi-tasks/:id')
-  @ApiOperation({ summary: 'Xóa nhiệm vụ KPI' })
-  async deleteKpiTask(@Param('id') id: string) {
-    return this.storesService.deleteKpiTask(id);
-  }
-
-  @Patch('kpi-tasks/:id/hide')
-  @ApiOperation({ summary: 'Ẩn nhiệm vụ KPI' })
-  async hideKpiTask(@Param('id') id: string) {
-    return this.storesService.hideKpiTask(id);
-  }
 
   // Daily Employee Reports
   @Post(':id/daily-reports')
@@ -3039,8 +3041,20 @@ export class StoresController {
     if (!photos || photos.length < 3) {
       throw new BadRequestException('At least 3 face photos required');
     }
-    const buffers = photos.map((p) => p.buffer);
-    return this.storesService.registerFace(employeeId, storeId, buffers);
+    // multerConfig uses diskStorage → file.buffer is undefined, read from file.path
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fsLib = require('fs');
+    const buffers = photos.map((p) => {
+      if (p.buffer) return p.buffer;
+      if (p.path) return fsLib.readFileSync(p.path);
+      throw new BadRequestException('Invalid file upload');
+    });
+    const result = await this.storesService.registerFace(employeeId, storeId, buffers);
+    // Clean up temp files
+    photos.forEach((p) => {
+      if (p.path) try { fsLib.unlinkSync(p.path); } catch (_e) { /* ignore cleanup errors */ }
+    });
+    return result;
   }
 
   @Get('employees/:employeeId/face-registration')
