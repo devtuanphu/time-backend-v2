@@ -121,4 +121,24 @@ export class StoresCronService {
       this.logger.error('Failed to generate slots for indefinite cycles:', error);
     }
   }
+
+  /**
+   * Cron job chạy vào 23:30 mỗi ngày
+   * Phát hiện nhân viên quên check-out + nghỉ không phép
+   * và ghi vào DailyEmployeeReport
+   */
+  @Cron('30 23 * * *', {
+    name: 'detect-attendance-issues',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async handleDetectAttendanceIssues() {
+    this.logger.log('Starting end-of-day attendance issues detection...');
+    
+    try {
+      const result = await this.storesService.detectEndOfDayAttendanceIssues();
+      this.logger.log(`Attendance issues detected: ${result.forgotCount} forgot clock-out, ${result.unauthorizedCount} unauthorized leaves`);
+    } catch (error) {
+      this.logger.error('Failed to detect attendance issues:', error);
+    }
+  }
 }

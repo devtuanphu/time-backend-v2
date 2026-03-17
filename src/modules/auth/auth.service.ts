@@ -11,6 +11,7 @@ import { AccountOtp } from '../accounts/entities/account-otp.entity';
 import { AccountStatus } from '../accounts/entities/account.entity';
 import { ZaloService } from '../zalo/zalo.service';
 import { EmployeeProfile } from '../stores/entities/employee-profile.entity';
+import { StoresService } from '../stores/stores.service';
 
 @Injectable()
 export class AuthService {
@@ -26,6 +27,7 @@ export class AuthService {
     private readonly employeeProfileRepository: Repository<EmployeeProfile>,
     private readonly mailService: MailService,
     private readonly zaloService: ZaloService,
+    private readonly storesService: StoresService,
   ) {}
 
   /**
@@ -89,11 +91,33 @@ export class AuthService {
       }
     }
 
+    // Fire-and-forget: ensure daily report exists (cron job fallback)
+    this.triggerDailyReportEnsure(user, appType, employeeData.storeId);
+
     return {
       access_token: accessToken,
       refresh_token: refreshTokenValue,
       user: { ...cleanUser, ...employeeData },
     };
+  }
+
+  /**
+   * Fire-and-forget: Đảm bảo daily report tồn tại khi login.
+   * Fallback cho cron job bị miss (server sập, lỗi...).
+   */
+  private triggerDailyReportEnsure(user: any, appType: AppType, storeId?: string): void {
+    const task = async () => {
+      try {
+        if (appType === AppType.EMPLOYEE_APP && storeId) {
+          await this.storesService.ensureDailyReportForStore(storeId);
+        } else if (appType === AppType.OWNER_APP) {
+          await this.storesService.ensureDailyReportsForOwner(user.id);
+        }
+      } catch (error) {
+        // Silent fail — không ảnh hưởng login
+      }
+    };
+    task(); // fire-and-forget, không await
   }
 
   async register(data: any) {

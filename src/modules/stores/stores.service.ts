@@ -4341,6 +4341,126 @@ export class StoresService {
     return this.dailyReportRepository.save(report);
   }
 
+  /**
+   * Lazy init fallback — đảm bảo daily report tồn tại cho store hôm nay.
+   * Returns report entity. Idempotent, có error handling.
+   * Dùng khi login (fallback cron) và khi ghi attendance events.
+   */
+  async ensureDailyReportForStore(storeId: string): Promise<DailyEmployeeReport | null> {
+    try {
+      return await this.createDailyReportForStore(storeId);
+    } catch (error) {
+      this.logger.warn(`[EnsureDailyReport] Failed for store ${storeId}: ${error?.message || error}`);
+      return null;
+    }
+  }
+
+  /**
+   * Lazy init fallback cho owner — đảm bảo daily report tồn tại cho tất cả stores của owner.
+   */
+  async ensureDailyReportsForOwner(ownerAccountId: string): Promise<void> {
+    try {
+      const stores = await this.storeRepository.find({
+        where: { ownerAccountId, status: StoreStatus.ACTIVE },
+        select: ['id'],
+      });
+      for (const store of stores) {
+        await this.ensureDailyReportForStore(store.id);
+      }
+    } catch (error) {
+      this.logger.warn(`[EnsureDailyReport] Failed for owner ${ownerAccountId}: ${error?.message || error}`);
+    }
+  }
+
+  /**
+   * Ghi nhận sự kiện chấm công vào DailyEmployeeReport.
+   * Tự tạo report nếu chưa có (lazy init). Tránh duplicate employeeId.
+   */
+  async appendToDailyReport(
+    storeId: string,
+    field: 'lateArrivals' | 'earlyDepartures' | 'forgotClockOut' | 'unauthorizedLeaves' | 'extraShifts' | 'authorizedLeaves',
+    employeeId: string,
+  ): Promise<void> {
+    try {
+      const report = await this.ensureDailyReportForStore(storeId);
+      if (!report) return;
+
+      // Tránh duplicate
+      if (!report[field].includes(employeeId)) {
+        report[field].push(employeeId);
+        await this.dailyReportRepository.save(report);
+        this.logger.debug(`[DailyReport] Appended ${employeeId} to ${field} for store ${storeId}`);
+      }
+    } catch (error) {
+      this.logger.warn(`[DailyReport] append ${field} failed: ${error?.message || error}`);
+    }
+  }
+
+  /**
+   * Cron cuối ngày: phát hiện quên check-out + nghỉ không phép.
+   * Scan tất cả shift assignments hôm nay cho tất cả stores active.
+   */
+  async detectEndOfDayAttendanceIssues(): Promise<{ forgotCount: number; unauthorizedCount: number }> {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0]; // 'YYYY-MM-DD'
+
+    let forgotCount = 0;
+    let unauthorizedCount = 0;
+
+    const stores = await this.storeRepository.find({
+      where: { status: StoreStatus.ACTIVE },
+      select: ['id'],
+    });
+
+    for (const store of stores) {
+      // Tìm tất cả shift slots hôm nay của store
+      const slots = await this.shiftSlotRepository.find({
+        where: {
+          cycle: { storeId: store.id },
+          workDate: todayStr,
+        },
+        relations: ['cycle', 'workShift'],
+      });
+
+      const slotIds = slots.map(s => s.id);
+      if (slotIds.length === 0) continue;
+
+      // Tìm tất cả assignments cho các slots này
+      const assignments = await this.shiftAssignmentRepository.find({
+        where: {
+          shiftSlotId: In(slotIds),
+          status: In([ShiftAssignmentStatus.APPROVED, ShiftAssignmentStatus.CONFIRMED, ShiftAssignmentStatus.COMPLETED]),
+        },
+      });
+
+      for (const assignment of assignments) {
+        const slot = slots.find(s => s.id === assignment.shiftSlotId);
+        if (!slot?.workShift?.endTime) continue;
+
+        // Check xem ca đã kết thúc chưa
+        const [endH, endM] = slot.workShift.endTime.split(':').map(Number);
+        const shiftEnd = new Date();
+        shiftEnd.setHours(endH, endM, 0, 0);
+
+        if (new Date() < shiftEnd) continue; // Ca chưa kết thúc, bỏ qua
+
+        // Case 1: Quên check-out — đã check-in nhưng chưa check-out sau khi ca kết thúc
+        if (assignment.checkInTime && !assignment.checkOutTime) {
+          await this.appendToDailyReport(store.id, 'forgotClockOut', assignment.employeeId);
+          forgotCount++;
+        }
+
+        // Case 2: Nghỉ không phép — được approved nhưng không check-in sau khi ca kết thúc
+        if (assignment.status === ShiftAssignmentStatus.APPROVED && !assignment.checkInTime) {
+          await this.appendToDailyReport(store.id, 'unauthorizedLeaves', assignment.employeeId);
+          unauthorizedCount++;
+        }
+      }
+    }
+
+    return { forgotCount, unauthorizedCount };
+  }
+
   async getDailyReports(storeId: string) {
     const reports = await this.dailyReportRepository.find({
       where: { storeId },
@@ -7944,6 +8064,11 @@ export class StoresService {
     if (checkinDistance != null) checkInLog.checkinDistance = checkinDistance;
     await this.attendanceLogRepository.save(checkInLog);
 
+    // Ghi nhận đi trễ vào DailyEmployeeReport
+    if (lateMinutes > 0 && storeId) {
+      this.appendToDailyReport(storeId, 'lateArrivals', assignment.employeeId);
+    }
+
     return {
       matched: true,
       distance: matchResult.distance,
@@ -8108,6 +8233,11 @@ export class StoresService {
     if (checkinLongitude != null) checkOutLog.checkinLongitude = checkinLongitude;
     if (checkinDistance != null) checkOutLog.checkinDistance = checkinDistance;
     await this.attendanceLogRepository.save(checkOutLog);
+
+    // Ghi nhận về sớm vào DailyEmployeeReport
+    if (earlyMinutes > 0 && storeId) {
+      this.appendToDailyReport(storeId, 'earlyDepartures', assignment.employeeId);
+    }
 
     return {
       matched: true,

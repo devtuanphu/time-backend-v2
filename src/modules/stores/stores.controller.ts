@@ -869,7 +869,7 @@ export class StoresController {
     if (fileUrls.contractFileUrl) {
       mergedDto.contract = {
         ...(mergedDto.contract || {}),
-        fileUrl: fileUrls.contractFileUrl,
+        contractFileUrl: fileUrls.contractFileUrl,
       };
     }
 

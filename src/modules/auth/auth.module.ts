@@ -10,12 +10,14 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { MailModule } from '../mail/mail.module';
 import { ZaloModule } from '../zalo/zalo.module';
 import { EmployeeProfile } from '../stores/entities/employee-profile.entity';
+import { StoresModule } from '../stores/stores.module';
 
 @Module({
   imports: [
     AccountsModule,
     MailModule,
     ZaloModule,
+    StoresModule,
     PassportModule,
     TypeOrmModule.forFeature([EmployeeProfile]),
     JwtModule.registerAsync({
