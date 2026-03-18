@@ -11,7 +11,7 @@ import { StorePaymentAccount } from './entities/store-payment-account.entity';
 import { Store, StoreStatus } from './entities/store.entity';
 import { StoreEmployeeType } from './entities/store-employee-type.entity';
 import { StoreRole } from './entities/store-role.entity';
-import { EmployeeProfile, EmploymentStatus } from './entities/employee-profile.entity';
+import { EmployeeProfile, EmploymentStatus, WorkingStatus } from './entities/employee-profile.entity';
 import { EmployeeProfileRole } from './entities/employee-profile-role.entity';
 import { EmployeeContract, PaymentType } from './entities/employee-contract.entity';
 import { WorkShift } from './entities/work-shift.entity';
@@ -3355,7 +3355,9 @@ export class StoresService {
       }
 
       // ========== CALCULATE TOTALS ==========
-      const allowancesTotal = 0; // Allowances can be configured separately
+      const allowancesTotal = activeContract.allowances
+        ? Object.values(activeContract.allowances).reduce((sum, v) => sum + Number(v || 0), 0)
+        : 0;
       const totalIncome = calculatedSalary + allowancesTotal + bonus;
       const advancePayment = 0; // Will be filled from salary advance requests
       const otherDeductions = 0;
@@ -3438,7 +3440,7 @@ export class StoresService {
     // Get all shift assignments for this employee in this month
     const assignments = await this.shiftAssignmentRepository
       .createQueryBuilder('sa')
-      .innerJoin('sa.shiftSlot', 'slot')
+      .leftJoinAndSelect('sa.shiftSlot', 'slot')
       .innerJoin('slot.cycle', 'cycle')
       .where('sa.employeeId = :employeeProfileId', { employeeProfileId })
       .andWhere('cycle.storeId = :storeId', { storeId })
@@ -3460,11 +3462,12 @@ export class StoresService {
     const earlyCount = assignments.filter(a => a.earlyMinutes > 0).length;
     const totalEarlyMinutes = assignments.reduce((sum, a) => sum + (a.earlyMinutes || 0), 0);
 
-    // Absent = assigned but not completed/confirmed (past shifts only)
+    // Absent = approved but never checked in (past shifts only)
     const today = new Date().toISOString().slice(0, 10);
     const absentCount = assignments.filter(a =>
-      a.status === ShiftAssignmentStatus.PENDING &&
-      (a as any).shiftSlot?.workDate < today,
+      a.status === ShiftAssignmentStatus.APPROVED &&
+      !a.checkInTime &&
+      a.shiftSlot?.workDate < today,
     ).length;
 
     // SUM of real-time shift earnings (from checkout)
@@ -8050,6 +8053,15 @@ export class StoresService {
     assignment.status = ShiftAssignmentStatus.CONFIRMED;
     await this.shiftAssignmentRepository.save(assignment);
 
+    // Fix 2: Sync workingStatus → WORKING
+    try {
+      await this.profileRepository.update(assignment.employeeId, {
+        workingStatus: WorkingStatus.WORKING,
+      });
+    } catch (err) {
+      this.logger.warn(`[CheckIn] workingStatus sync failed: ${err?.message}`);
+    }
+
     // Create audit log with GPS data
     const checkInLog = new AttendanceLog();
     checkInLog.shiftAssignmentId = assignmentId;
@@ -8239,6 +8251,153 @@ export class StoresService {
       this.appendToDailyReport(storeId, 'earlyDepartures', assignment.employeeId);
     }
 
+    // ===== Fix 2: Sync workingStatus → IDLE =====
+    try {
+      await this.profileRepository.update(assignment.employeeId, {
+        workingStatus: WorkingStatus.IDLE,
+      });
+    } catch (err) {
+      this.logger.warn(`[CheckOut] workingStatus sync failed: ${err?.message}`);
+    }
+
+    // ===== Fix 1: Real-time MonthlySummary Update =====
+    try {
+      const monthDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      let summary = await this.monthlySummaryRepository.findOne({
+        where: { employeeProfileId: assignment.employeeId, month: monthDate },
+      });
+      if (!summary) {
+        const employeeForSummary = await this.profileRepository.findOne({
+          where: { id: assignment.employeeId },
+          relations: ['contracts'],
+        });
+        const contractForSummary = employeeForSummary?.contracts?.find(c => c.isActive);
+        summary = this.monthlySummaryRepository.create({
+          employeeProfileId: assignment.employeeId,
+          month: monthDate,
+          baseSalary: contractForSummary?.salaryAmount || 0,
+        });
+      }
+      summary.completedShifts = (summary.completedShifts || 0) + 1;
+      summary.monthlyWorkHours = Number(summary.monthlyWorkHours || 0) + (workedMinutes / 60);
+      if (assignment.lateMinutes > 0) summary.lateArrivalsCount = (summary.lateArrivalsCount || 0) + 1;
+      if (earlyMinutes > 0) summary.earlyDeparturesCount = (summary.earlyDeparturesCount || 0) + 1;
+      if (shiftEarnings != null) {
+        summary.estimatedSalary = Number(summary.estimatedSalary || 0) + shiftEarnings;
+      }
+      await this.monthlySummaryRepository.save(summary);
+      this.logger.debug(`[CheckOut] MonthlySummary updated: shifts=${summary.completedShifts}, hours=${summary.monthlyWorkHours}`);
+    } catch (err) {
+      this.logger.warn(`[CheckOut] MonthlySummary update failed: ${err?.message}`);
+    }
+
+    // ===== Fix 5: Real-time EmployeeSalary + netSalary =====
+    let netSalaryResult: number | null = null;
+    try {
+      const monthDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+      // 1. Load employee profile + contract (reuse if already loaded)
+      const employeeForSalary = await this.profileRepository.findOne({
+        where: { id: assignment.employeeId },
+        relations: ['contracts'],
+      });
+      const activeContractForSalary = employeeForSalary?.contracts?.find(c => c.isActive);
+
+      if (activeContractForSalary && storeId) {
+        const currentBaseSalary = Number(activeContractForSalary.salaryAmount) || 0;
+        const paymentType = activeContractForSalary.paymentType || PaymentType.MONTH;
+
+        // 2. Allowances from contract
+        const allowancesMap = activeContractForSalary.allowances || {};
+        const allowancesTotal = Object.values(allowancesMap)
+          .reduce((sum, v) => sum + Number(v || 0), 0);
+
+        // 3. Re-aggregate attendance
+        const attendanceSummary = await this.calculateEmployeeAttendanceSummary(
+          assignment.employeeId, storeId, monthDate, nextMonthDate,
+        );
+
+        // 4. Calculate salary (same logic as batch)
+        let calculatedSalary = 0;
+        if (attendanceSummary.hasShiftEarnings) {
+          calculatedSalary = attendanceSummary.totalShiftEarnings;
+        } else if (paymentType === PaymentType.HOUR) {
+          calculatedSalary = currentBaseSalary * attendanceSummary.workingHours;
+        } else if (paymentType === PaymentType.SHIFT || paymentType === PaymentType.DAY) {
+          calculatedSalary = currentBaseSalary * attendanceSummary.completedShifts;
+        } else {
+          const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+          calculatedSalary = daysInMonth > 0
+            ? currentBaseSalary * (attendanceSummary.completedShifts / daysInMonth)
+            : currentBaseSalary;
+        }
+
+        // 5. Apply PayrollRules
+        const payrollRules = await this.payrollRuleRepository.find({
+          where: { storeId, isActive: true },
+        });
+        let bonus = 0, penalty = 0;
+        for (const rule of payrollRules) {
+          if (rule.category === PayrollRuleCategory.FINE) {
+            if (rule.ruleType === 'LATE' && attendanceSummary.lateCount > 0) {
+              penalty += rule.calcType === PayrollCalcType.AMOUNT
+                ? Number(rule.value) * attendanceSummary.lateCount
+                : (calculatedSalary * Number(rule.value) / 100) * attendanceSummary.lateCount;
+            }
+            if (rule.ruleType === 'EARLY' && attendanceSummary.earlyCount > 0) {
+              penalty += rule.calcType === PayrollCalcType.AMOUNT
+                ? Number(rule.value) * attendanceSummary.earlyCount
+                : (calculatedSalary * Number(rule.value) / 100) * attendanceSummary.earlyCount;
+            }
+            if (rule.ruleType === 'ABSENT' && attendanceSummary.absentCount > 0) {
+              penalty += Number(rule.value) * attendanceSummary.absentCount;
+            }
+          } else if (rule.category === PayrollRuleCategory.BONUS) {
+            if (rule.ruleType === 'ATTENDANCE' && attendanceSummary.lateCount === 0 && attendanceSummary.absentCount === 0) {
+              bonus += Number(rule.value);
+            }
+            if (!rule.ruleType || rule.ruleType === 'GENERAL') {
+              bonus += Number(rule.value);
+            }
+          }
+        }
+
+        // 6. Calculate totals
+        const totalIncome = Math.round(calculatedSalary + allowancesTotal + bonus);
+        const totalDeductions = Math.round(penalty);
+        const netSalary = Math.max(0, totalIncome - totalDeductions);
+        netSalaryResult = netSalary;
+
+        // 7. Upsert EmployeeSalary
+        let salary = await this.employeeSalaryRepository.findOne({
+          where: { employeeProfileId: assignment.employeeId, month: monthDate },
+        });
+        if (!salary) {
+          salary = this.employeeSalaryRepository.create({
+            employeeProfileId: assignment.employeeId,
+            month: monthDate,
+          });
+        }
+        salary.baseSalary = currentBaseSalary;
+        salary.paymentType = paymentType;
+        salary.allowances = allowancesMap;
+        salary.workingDays = attendanceSummary.completedShifts;
+        salary.workingHours = attendanceSummary.workingHours;
+        salary.unauthorizedLeaveDays = attendanceSummary.absentCount;
+        salary.bonus = bonus;
+        salary.penalty = penalty;
+        salary.totalIncome = totalIncome;
+        salary.totalDeductions = totalDeductions;
+        salary.netSalary = netSalary;
+        await this.employeeSalaryRepository.save(salary);
+
+        this.logger.debug(`[CheckOut] Real-time salary: income=${totalIncome}, deductions=${totalDeductions}, net=${netSalary}`);
+      }
+    } catch (err) {
+      this.logger.warn(`[CheckOut] Real-time salary update failed: ${err?.message}`);
+    }
+
     return {
       matched: true,
       distance: matchResult.distance,
@@ -8248,6 +8407,7 @@ export class StoresService {
       checkOutTime: now.toISOString(),
       gpsDistance: checkinDistance != null ? Math.round(checkinDistance) : null,
       shiftEarnings,
+      netSalary: netSalaryResult,
     };
   }
 
