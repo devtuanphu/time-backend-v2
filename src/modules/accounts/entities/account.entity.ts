@@ -27,7 +27,7 @@ export class Account extends BaseEntity {
   @Column({ name: 'marital_status', nullable: true })
   maritalStatus: string;
 
-  @Column({ unique: true })
+  @Column({ unique: true, nullable: true })
   email: string;
 
   @Column({ unique: true })
