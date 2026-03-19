@@ -12,7 +12,7 @@ export enum AccountStatus {
 
 @Entity('accounts')
 export class Account extends BaseEntity {
-  @Column({ name: 'full_name' })
+  @Column({ name: 'full_name', nullable: true })
   fullName: string;
 
   @Column({ nullable: true })

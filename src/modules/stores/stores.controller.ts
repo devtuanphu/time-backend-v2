@@ -2281,6 +2281,24 @@ export class StoresController {
     return this.storesService.deleteEmployeeSalary(salaryId);
   }
 
+  // Employee Salary Payment History
+  @Get('employees/:profileId/salary-history')
+  @ApiOperation({ summary: 'Lấy lịch sử thanh toán lương của nhân viên (phân trang)' })
+  @ApiQuery({ name: 'page', required: false, example: '1' })
+  @ApiQuery({ name: 'limit', required: false, example: '10' })
+  @ApiResponse({ status: 200, description: 'Danh sách lịch sử thanh toán' })
+  async getEmployeeSalaryHistory(
+    @Param('profileId') profileId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.storesService.getEmployeeSalaryHistory(
+      profileId,
+      parseInt(page || '1', 10),
+      parseInt(limit || '10', 10),
+    );
+  }
+
   // Salary Advance Requests
   @Post('employees/:profileId/salary-advance-requests')
   @ApiOperation({ summary: 'Tạo yêu cầu ứng lương' })

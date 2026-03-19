@@ -6247,6 +6247,17 @@ export class StoresService {
     });
   }
 
+  async getEmployeeSalaryHistory(profileId: string, page = 1, limit = 10) {
+    const [data, total] = await this.employeePaymentHistoryRepository.findAndCount({
+      where: { employeeProfileId: profileId },
+      order: { paymentDate: 'DESC' },
+      relations: ['store'],
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+    return { data, total, page, limit };
+  }
+
   async updateEmployeePaymentHistory(id: string, data: Partial<EmployeePaymentHistory>) {
     const payment = await this.employeePaymentHistoryRepository.findOne({ where: { id } });
     if (!payment) throw new NotFoundException('Không tìm thấy lịch sử thanh toán');
@@ -8280,13 +8291,30 @@ export class StoresService {
       }
       summary.completedShifts = (summary.completedShifts || 0) + 1;
       summary.monthlyWorkHours = Number(summary.monthlyWorkHours || 0) + (workedMinutes / 60);
-      if (assignment.lateMinutes > 0) summary.lateArrivalsCount = (summary.lateArrivalsCount || 0) + 1;
+      if (assignment.lateMinutes > 0) {
+        summary.lateArrivalsCount = (summary.lateArrivalsCount || 0) + 1;
+      } else {
+        // Fix: onTimeArrivalsCount — tăng khi đi đúng giờ
+        summary.onTimeArrivalsCount = (summary.onTimeArrivalsCount || 0) + 1;
+      }
       if (earlyMinutes > 0) summary.earlyDeparturesCount = (summary.earlyDeparturesCount || 0) + 1;
       if (shiftEarnings != null) {
         summary.estimatedSalary = Number(summary.estimatedSalary || 0) + shiftEarnings;
       }
+
+      // Fix: totalWorkHours & totalCompletedShifts — tích lũy xuyên tháng
+      summary.totalWorkHours = Number(summary.totalWorkHours || 0) + (workedMinutes / 60);
+      summary.totalCompletedShifts = (summary.totalCompletedShifts || 0) + 1;
+
+      // Fix: performanceScore — tự động tính = (onTimeArrivals / completedShifts) * 100
+      if (summary.completedShifts > 0) {
+        summary.performanceScore = Math.round(
+          ((summary.onTimeArrivalsCount || 0) / summary.completedShifts) * 100,
+        );
+      }
+
       await this.monthlySummaryRepository.save(summary);
-      this.logger.debug(`[CheckOut] MonthlySummary updated: shifts=${summary.completedShifts}, hours=${summary.monthlyWorkHours}`);
+      this.logger.debug(`[CheckOut] MonthlySummary updated: shifts=${summary.completedShifts}, onTime=${summary.onTimeArrivalsCount}, totalHours=${summary.totalWorkHours}, perf=${summary.performanceScore}%`);
     } catch (err) {
       this.logger.warn(`[CheckOut] MonthlySummary update failed: ${err?.message}`);
     }
