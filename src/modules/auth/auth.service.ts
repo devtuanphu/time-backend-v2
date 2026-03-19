@@ -160,6 +160,7 @@ export class AuthService {
         };
       }
     } catch (error) {
+      console.error('🔴 Register error details:', error?.message || error);
       if (error.status === 409) {
         throw error;
       }
