@@ -2084,15 +2084,50 @@ export class StoresController {
     return this.storesService.getPayrollSummary(id, date);
   }
 
+  @Get(':id/payroll-details')
+  @ApiOperation({ summary: 'Lấy danh sách chi tiết phạt, thưởng và tăng ca trong tháng' })
+  @ApiQuery({ name: 'date', required: true, example: '11/2025', description: 'Tháng cần lấy báo cáo (MM/YYYY)' })
+  @ApiResponse({ status: 200, description: 'Danh sách chi tiết' })
+  async getPayrollDetails(
+    @Param('id') id: string,
+    @Query('date') date: string,
+  ) {
+    if (!date) throw new BadRequestException('Vui lòng cung cấp tháng (date)');
+    return this.storesService.getPayrollDetailsList(id, date);
+  }
+
   @Patch(':id/salary-fund')
   @ApiOperation({ summary: 'Cập nhật quỹ lương của cửa hàng trong tháng' })
   @ApiQuery({ name: 'date', required: true, example: '11/2025' })
   async updateSalaryFund(
     @Param('id') id: string,
     @Query('date') date: string,
-    @Body('amount') amount: number,
+    @Body() body: any,
   ) {
+    const amount = body.amount ?? body.salaryFund;
     return this.storesService.updateSalaryFund(id, date, amount);
+  }
+
+  @Get(':id/payroll-report/export')
+  @ApiOperation({ summary: 'Xuất file báo cáo quỹ lương tháng' })
+  @ApiQuery({ name: 'date', required: true, example: '11/2025' })
+  async exportPayrollReport(
+    @Param('id') id: string,
+    @Query('date') date: string,
+    @Res() res: any,
+  ) {
+    if (!id || !date) throw new BadRequestException('Vui lòng cung cấp storeId và date');
+    const buffer = await this.storesService.downloadPayrollReport(id, date);
+    
+    let slugDate = date.replace('/', '-');
+    const fileName = `Bao_Cao_Quy_Luong_${slugDate}.xlsx`;
+
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+    });
+
+    res.send(buffer);
   }
 
   @Get(':id/general-dashboard')

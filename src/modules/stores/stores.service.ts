@@ -3595,7 +3595,164 @@ export class StoresService {
     };
   }
 
+  async getPayrollDetailsList(storeId: string, monthStr: string) {
+    let targetMonth: Date;
+    if (monthStr.includes('/')) {
+      const [m, y] = monthStr.split('/').map(Number);
+      targetMonth = new Date(y, m - 1, 1);
+    } else {
+      const parsed = new Date(monthStr);
+      targetMonth = new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+    }
 
+    const payroll = await this.payrollRepository.findOne({
+      where: { storeId, month: targetMonth },
+    });
+
+    if (!payroll) {
+      return { bonuses: [], penalties: [], overtimes: [] };
+    }
+
+    const salaries = await this.employeeSalaryRepository.find({
+      where: { monthlyPayrollId: payroll.id },
+      relations: ['employeeProfile', 'employeeProfile.account', 'employeeProfile.employeeType', 'employeeProfile.storeRole'],
+    });
+
+    if (salaries.length === 0) {
+      return { bonuses: [], penalties: [], overtimes: [] };
+    }
+
+    const summaries = await this.monthlySummaryRepository.find({
+      where: {
+        employeeProfileId: In(salaries.map(s => s.employeeProfileId)),
+        month: targetMonth,
+      },
+    });
+
+    const summaryMap = new Map();
+    summaries.forEach(s => summaryMap.set(s.employeeProfileId, s));
+
+    const bonuses: any[] = [];
+    const penalties: any[] = [];
+    const overtimes: any[] = [];
+
+    salaries.forEach(salary => {
+      const profile = salary.employeeProfile;
+      const summary = summaryMap.get(salary.employeeProfileId);
+
+      const baseInfo = {
+        id: profile?.id,
+        name: (profile?.account as any)?.fullName || (profile?.account as any)?.name || 'Unknown',
+        position: profile?.storeRole?.name || '',
+        type: profile?.employeeType?.name || '',
+        avatar: (profile?.account as any)?.avatarUrl || (profile?.account as any)?.avatar || '',
+      };
+
+      if (Number(salary.penalty) > 0) {
+        let reasons: string[] = [];
+        if (summary) {
+          if (summary.lateArrivalsCount > 0) reasons.push(`Muộn ${summary.lateArrivalsCount} lần`);
+          if (summary.earlyDeparturesCount > 0) reasons.push(`Về sớm ${summary.earlyDeparturesCount} lần`);
+          if (summary.unauthorizedLeavesCount > 0) reasons.push(`Nghỉ KP ${summary.unauthorizedLeavesCount} lần`);
+          if (summary.forgotClockOutCount > 0) reasons.push(`Quên Check-out ${summary.forgotClockOutCount} lần`);
+          if (summary.absentCount > 0) reasons.push(`Vắng ${summary.absentCount} ca`);
+        }
+        penalties.push({
+          ...baseInfo,
+          penaltyReason: reasons.length > 0 ? reasons.join(', ') : 'Vi phạm quy định',
+          penaltyAmount: Number(salary.penalty),
+        });
+      }
+
+      if (Number(salary.bonus) > 0) {
+        bonuses.push({
+          ...baseInfo,
+          bonusReason: 'Thưởng chuyên cần / Thưởng chung',
+          bonusAmount: Number(salary.bonus),
+        });
+      }
+
+      if (summary && summary.extraShiftsCount > 0) {
+        overtimes.push({
+          ...baseInfo,
+          overtimeReason: `Làm thêm ${summary.extraShiftsCount} ca`,
+          overtimeAmount: Number(summary.overtimePay || 0),
+        });
+      }
+    });
+
+    return { bonuses, penalties, overtimes };
+  }
+
+  async downloadPayrollReport(storeId: string, monthStr: string) {
+    const exceljs = require('exceljs');
+    const workbook = new exceljs.Workbook();
+    
+    let targetMonth: Date;
+    if (monthStr.includes('/')) {
+      const [m, y] = monthStr.split('/').map(Number);
+      targetMonth = new Date(y, m - 1, 1);
+    } else {
+      const parsed = new Date(monthStr);
+      targetMonth = new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+    }
+
+    const payroll = await this.payrollRepository.findOne({
+      where: { storeId, month: targetMonth },
+    });
+
+    if (!payroll) {
+      throw new BadRequestException('Chưa có thông tin dữ liệu cho tháng này');
+    }
+
+    const salaries = await this.employeeSalaryRepository.find({
+      where: { monthlyPayrollId: payroll.id },
+      relations: ['employeeProfile', 'employeeProfile.account', 'employeeProfile.employeeType', 'employeeProfile.storeRole'],
+    });
+
+    if (salaries.length === 0) {
+      throw new BadRequestException('Bảng lương tháng này chưa có nhân viên nào');
+    }
+
+    const ws1 = workbook.addWorksheet('Ghi chú bảng lương');
+    ws1.columns = [
+      { header: 'STT', key: 'stt', width: 5 },
+      { header: 'Tên nhân viên', key: 'name', width: 25 },
+      { header: 'Vị trí', key: 'role', width: 20 },
+      { header: 'Lương cơ bản', key: 'base', width: 15 },
+      { header: 'Thưởng', key: 'bonus', width: 15 },
+      { header: 'Khấu trừ (Phạt/Ứng)', key: 'deductions', width: 22 },
+      { header: 'Tổng thu nhập', key: 'income', width: 15 },
+      { header: 'Thực lãnh', key: 'net', width: 15 },
+    ];
+
+    ws1.getRow(1).font = { bold: true };
+    salaries.forEach((salary, idx) => {
+      const profile = salary.employeeProfile;
+      ws1.addRow({
+        stt: idx + 1,
+        name: (profile?.account as any)?.fullName || (profile?.account as any)?.name || 'Unknown',
+        role: profile?.storeRole?.name || '',
+        base: Number(salary.baseSalary || 0),
+        bonus: Number(salary.bonus || 0),
+        deductions: Number(salary.totalDeductions || salary.penalty || 0),
+        income: Number(salary.totalIncome || 0),
+        net: Number(salary.netSalary || 0)
+      });
+    });
+
+    for (let i = 2; i <= salaries.length + 1; i++) {
+        ['base', 'bonus', 'deductions', 'income', 'net'].forEach(col => {
+            const cell = ws1.getRow(i).getCell(col);
+            if (cell.value) {
+                cell.numFmt = '#,##0';
+            }
+        });
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+  }
 
   async updateSalaryFund(storeId: string, dateStr: string, salaryFund: number, userId?: string) {
     if (!dateStr) throw new BadRequestException('Vui lòng cung cấp ngày tháng (date)');
