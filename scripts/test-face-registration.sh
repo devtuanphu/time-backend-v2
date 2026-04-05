@@ -5,7 +5,7 @@
 #  Không cần input gì — script tự tạo account, store, employee
 # ============================================================
 
-API_BASE="http://localhost:3000/api"
+API_BASE="http://localhost:7777/api"
 TIMESTAMP=$(date +%s)
 TEST_PHONE="099${TIMESTAMP: -7}"
 TEST_EMAIL="facetest_${TIMESTAMP}@test.com"
