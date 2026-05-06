@@ -2438,7 +2438,7 @@ export class StoresService {
           cycleId: savedCycle.id,
           workShiftId: t.workShiftId,
           dayOfWeek: t.dayOfWeek,
-          maxStaff: t.maxStaff || 1,
+          maxStaff: t.maxStaff !== undefined ? t.maxStaff : null,
         }),
       );
       await this.cycleTemplateRepository.save(templateEntities);
@@ -2453,7 +2453,7 @@ export class StoresService {
           cycleId: savedCycle.id,
           workShiftId: s.workShiftId,
           workDate: s.workDate,
-          maxStaff: s.maxStaff || 1,
+          maxStaff: s.maxStaff !== undefined ? s.maxStaff : null,
         }),
       );
       await this.shiftSlotRepository.save(slotEntities);
@@ -2505,7 +2505,7 @@ export class StoresService {
           cycleId,
           workShiftId: shiftId,
           workDate: dateStr,
-          maxStaff: workShift?.defaultMaxStaff || 1, // Lấy từ WorkShift
+          maxStaff: workShift?.defaultMaxStaff || null, // Lấy từ WorkShift
         });
       }
       current.setDate(current.getDate() + 1);
@@ -2844,7 +2844,10 @@ export class StoresService {
       const result: any = {
         ...slot,
         currentCount: slot.assignments?.length || 0,
-        isFull: (slot.assignments?.length || 0) >= slot.maxStaff,
+        isFull:
+          slot.maxStaff !== null
+            ? (slot.assignments?.length || 0) >= slot.maxStaff
+            : false,
         // Ưu tiên slot-specific time, fallback sang workShift time
         effectiveStartTime: slot.startTime || slot.workShift?.startTime,
         effectiveEndTime: slot.endTime || slot.workShift?.endTime,
@@ -2933,7 +2936,10 @@ export class StoresService {
         employeeAvatar: (a as any).employee?.account?.avatarUrl || null,
       })),
       currentCount: slot.assignments?.length || 0,
-      isFull: (slot.assignments?.length || 0) >= slot.maxStaff,
+      isFull:
+        slot.maxStaff !== null
+          ? (slot.assignments?.length || 0) >= slot.maxStaff
+          : false, // null = unlimited
     }));
   }
 
@@ -2974,12 +2980,13 @@ export class StoresService {
 
       // P0-3: Check capacity with lock held (prevents race condition)
       // Bug 2.1 fix: Only count non-cancelled assignments
+      // null maxStaff = unlimited capacity
       const activeCount =
         slot.assignments?.filter(
           (a) => a.status !== ShiftAssignmentStatus.CANCELLED,
         ).length || 0;
 
-      if (activeCount >= slot.maxStaff) {
+      if (slot.maxStaff !== null && activeCount >= slot.maxStaff) {
         throw new BadRequestException('Ca đã đầy người');
       }
 
@@ -3005,13 +3012,12 @@ export class StoresService {
       }
 
       // Create and save assignment
+      // Auto-approve: ai đăng ký trước giành slot trước, không cần duyệt
       const assignment = manager.create(ShiftAssignment, {
         shiftSlotId: slotId,
         employeeId,
         note,
-        status: isOwnerAssign
-          ? ShiftAssignmentStatus.APPROVED
-          : ShiftAssignmentStatus.PENDING,
+        status: ShiftAssignmentStatus.APPROVED,
       });
       return manager.save(assignment);
     });

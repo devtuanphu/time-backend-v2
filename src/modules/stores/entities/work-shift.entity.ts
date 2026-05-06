@@ -23,8 +23,8 @@ export class WorkShift extends BaseEntity {
   @Column({ name: 'color_code', nullable: true })
   colorCode: string;
 
-  @Column({ name: 'default_max_staff', type: 'int', default: 1 })
-  defaultMaxStaff: number;
+  @Column({ name: 'default_max_staff', type: 'int', nullable: true })
+  defaultMaxStaff: number | null;
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;

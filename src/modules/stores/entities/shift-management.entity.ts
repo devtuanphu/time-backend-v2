@@ -8,26 +8,26 @@ import { EmployeeProfile } from './employee-profile.entity';
 
 // Loại chu kỳ ca làm việc
 export enum CycleType {
-  DAILY = 'DAILY',           // Theo ngày
-  WEEKLY = 'WEEKLY',         // Theo tuần
-  MONTHLY = 'MONTHLY',       // Theo tháng
+  DAILY = 'DAILY', // Theo ngày
+  WEEKLY = 'WEEKLY', // Theo tuần
+  MONTHLY = 'MONTHLY', // Theo tháng
   INDEFINITE = 'INDEFINITE', // Vô thời hạn
 }
 
 // Trạng thái chu kỳ
 export enum WorkCycleStatus {
-  DRAFT = 'DRAFT',       // Nháp
-  ACTIVE = 'ACTIVE',     // Đang hoạt động
-  STOPPED = 'STOPPED',   // Đã dừng thủ công
-  EXPIRED = 'EXPIRED',   // Đã hết hạn tự nhiên
+  DRAFT = 'DRAFT', // Nháp
+  ACTIVE = 'ACTIVE', // Đang hoạt động
+  STOPPED = 'STOPPED', // Đã dừng thủ công
+  EXPIRED = 'EXPIRED', // Đã hết hạn tự nhiên
 }
 
 export enum ShiftAssignmentStatus {
-  PENDING = 'PENDING',       // Employee registered, waiting for owner approval
-  APPROVED = 'APPROVED',     // Approved by owner or auto-approved (owner assign), ready for check-in
-  CONFIRMED = 'CONFIRMED',   // Checked in
-  COMPLETED = 'COMPLETED',   // Checked out
-  CANCELLED = 'CANCELLED',   // Rejected or cancelled
+  PENDING = 'PENDING', // Employee registered, waiting for owner approval
+  APPROVED = 'APPROVED', // Approved by owner or auto-approved (owner assign), ready for check-in
+  CONFIRMED = 'CONFIRMED', // Checked in
+  COMPLETED = 'COMPLETED', // Checked out
+  CANCELLED = 'CANCELLED', // Rejected or cancelled
 }
 
 export enum ShiftSwapStatus {
@@ -112,7 +112,9 @@ export class CycleShiftTemplate extends BaseEntity {
   @Column({ name: 'cycle_id' })
   cycleId: string;
 
-  @ManyToOne(() => WorkCycle, (cycle) => cycle.templates, { onDelete: 'CASCADE' })
+  @ManyToOne(() => WorkCycle, (cycle) => cycle.templates, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'cycle_id' })
   cycle: WorkCycle;
 
@@ -130,8 +132,8 @@ export class CycleShiftTemplate extends BaseEntity {
   })
   dayOfWeek: WeekDaySchedule;
 
-  @Column({ name: 'max_staff', type: 'int', default: 1 })
-  maxStaff: number;
+  @Column({ name: 'max_staff', type: 'int', nullable: true })
+  maxStaff: number | null;
 }
 
 @Entity('shift_slots')
@@ -140,107 +142,109 @@ export class ShiftSlot extends BaseEntity {
   cycleId: string;
 
   @ManyToOne(() => WorkCycle, (cycle) => cycle.slots, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'cycle_id' })
-    cycle: WorkCycle;
+  @JoinColumn({ name: 'cycle_id' })
+  cycle: WorkCycle;
 
-    @Column({ name: 'work_shift_id' })
-    workShiftId: string;
+  @Column({ name: 'work_shift_id' })
+  workShiftId: string;
 
-    @ManyToOne(() => WorkShift, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'work_shift_id' })
-    workShift: WorkShift;
+  @ManyToOne(() => WorkShift, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'work_shift_id' })
+  workShift: WorkShift;
 
-    @Column({ name: 'work_date', type: 'date' })
-    workDate: string;
+  @Column({ name: 'work_date', type: 'date' })
+  workDate: string;
 
-    @Column({ name: 'start_time', type: 'time', nullable: true })
-    startTime?: string;
+  @Column({ name: 'start_time', type: 'time', nullable: true })
+  startTime?: string;
 
-    @Column({ name: 'end_time', type: 'time', nullable: true })
-    endTime?: string;
+  @Column({ name: 'end_time', type: 'time', nullable: true })
+  endTime?: string;
 
-    @Column({ name: 'max_staff', type: 'int', default: 1 })
-    maxStaff: number;
+  @Column({ name: 'max_staff', type: 'int', nullable: true })
+  maxStaff: number | null;
 
-    @Column({ type: 'text', nullable: true })
-    note?: string;
+  @Column({ type: 'text', nullable: true })
+  note?: string;
 
-    @OneToMany(() => ShiftAssignment, (assignment) => assignment.shiftSlot)
-    assignments: ShiftAssignment[];
+  @OneToMany(() => ShiftAssignment, (assignment) => assignment.shiftSlot)
+  assignments: ShiftAssignment[];
 }
 
 @Entity('shift_assignments')
 export class ShiftAssignment extends BaseEntity {
-    @Column({ name: 'shift_slot_id' })
-    shiftSlotId: string;
+  @Column({ name: 'shift_slot_id' })
+  shiftSlotId: string;
 
-    @ManyToOne(() => ShiftSlot, (slot) => slot.assignments, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'shift_slot_id' })
-    shiftSlot: ShiftSlot;
+  @ManyToOne(() => ShiftSlot, (slot) => slot.assignments, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'shift_slot_id' })
+  shiftSlot: ShiftSlot;
 
-    @Column({ name: 'employee_id' })
-    employeeId: string;
+  @Column({ name: 'employee_id' })
+  employeeId: string;
 
-    @ManyToOne(() => EmployeeProfile, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'employee_id' })
-    employee: EmployeeProfile;
+  @ManyToOne(() => EmployeeProfile, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'employee_id' })
+  employee: EmployeeProfile;
 
-    @Column({
-        type: 'enum',
-        enum: ShiftAssignmentStatus,
-        default: ShiftAssignmentStatus.PENDING,
-    })
-    status: ShiftAssignmentStatus;
+  @Column({
+    type: 'enum',
+    enum: ShiftAssignmentStatus,
+    default: ShiftAssignmentStatus.PENDING,
+  })
+  status: ShiftAssignmentStatus;
 
-    @Column({ name: 'check_in_time', type: 'timestamp', nullable: true })
-    checkInTime: Date;
+  @Column({ name: 'check_in_time', type: 'timestamp', nullable: true })
+  checkInTime: Date;
 
-    @Column({ name: 'check_out_time', type: 'timestamp', nullable: true })
-    checkOutTime: Date;
+  @Column({ name: 'check_out_time', type: 'timestamp', nullable: true })
+  checkOutTime: Date;
 
-    @Column({ type: 'text', nullable: true })
-    note?: string;
+  @Column({ type: 'text', nullable: true })
+  note?: string;
 
-    @Column({ name: 'worked_minutes', type: 'int', default: 0 })
-    workedMinutes: number;
+  @Column({ name: 'worked_minutes', type: 'int', default: 0 })
+  workedMinutes: number;
 
-    @Column({ name: 'late_minutes', type: 'int', default: 0 })
-    lateMinutes: number;
+  @Column({ name: 'late_minutes', type: 'int', default: 0 })
+  lateMinutes: number;
 
-    @Column({ name: 'early_minutes', type: 'int', default: 0 })
-    earlyMinutes: number;
+  @Column({ name: 'early_minutes', type: 'int', default: 0 })
+  earlyMinutes: number;
 
-    @Column({
-      name: 'attendance_status',
-      type: 'enum',
-      enum: AttendanceStatus,
-      nullable: true,
-    })
-    attendanceStatus: AttendanceStatus;
+  @Column({
+    name: 'attendance_status',
+    type: 'enum',
+    enum: AttendanceStatus,
+    nullable: true,
+  })
+  attendanceStatus: AttendanceStatus;
 
-    @Column({ name: 'check_in_face_url', nullable: true })
-    checkInFaceUrl: string;
+  @Column({ name: 'check_in_face_url', nullable: true })
+  checkInFaceUrl: string;
 
-    @Column({ name: 'check_out_face_url', nullable: true })
-    checkOutFaceUrl: string;
+  @Column({ name: 'check_out_face_url', nullable: true })
+  checkOutFaceUrl: string;
 
-    @Column({
-      name: 'shift_earnings',
-      type: 'decimal',
-      precision: 12,
-      scale: 2,
-      nullable: true,
-      comment: 'Calculated earnings for this shift based on contract type',
-    })
-    shiftEarnings: number;
+  @Column({
+    name: 'shift_earnings',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+    comment: 'Calculated earnings for this shift based on contract type',
+  })
+  shiftEarnings: number;
 }
 
 @Entity('shift_swaps')
 export class ShiftSwap extends BaseEntity {
-    @Column({ name: 'from_assignment_id' })
-    fromAssignmentId: string;
+  @Column({ name: 'from_assignment_id' })
+  fromAssignmentId: string;
 
-    @ManyToOne(() => ShiftAssignment, { onDelete: 'CASCADE' })
+  @ManyToOne(() => ShiftAssignment, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'from_assignment_id' })
   fromAssignment: ShiftAssignment;
 
