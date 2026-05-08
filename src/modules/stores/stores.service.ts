@@ -2901,7 +2901,9 @@ export class StoresService {
       .leftJoinAndSelect('assignment.employee', 'employee')
       .leftJoinAndSelect('employee.account', 'account')
       .leftJoin('slot.cycle', 'cycle')
-      .where('cycle.storeId = :storeId', { storeId })
+      .where('(cycle.storeId = :storeId OR slot.storeId = :storeId)', {
+        storeId,
+      })
       .orderBy('slot.workDate', 'ASC')
       .addOrderBy('workShift.startTime', 'ASC');
 
@@ -2932,14 +2934,27 @@ export class StoresService {
         id: a.id,
         employeeId: a.employeeId,
         status: a.status,
-        employeeName: (a as any).employee?.account?.fullName || null,
-        employeeAvatar: (a as any).employee?.account?.avatarUrl || null,
+        employee: a.employee
+          ? {
+              id: a.employee.id,
+              fullName: a.employee.account?.fullName || null,
+              avatarUrl: a.employee.account?.avatar || null,
+              account: {
+                fullName: a.employee.account?.fullName || null,
+                avatarUrl: a.employee.account?.avatar || null,
+              },
+            }
+          : null,
       })),
-      currentCount: slot.assignments?.length || 0,
+      currentCount: slot.assignments?.filter(
+        (a) => a.status !== ShiftAssignmentStatus.CANCELLED,
+      ).length,
       isFull:
         slot.maxStaff !== null
-          ? (slot.assignments?.length || 0) >= slot.maxStaff
-          : false, // null = unlimited
+          ? (slot.assignments?.filter(
+              (a) => a.status !== ShiftAssignmentStatus.CANCELLED,
+            ).length || 0) >= slot.maxStaff
+          : false,
     }));
   }
 
@@ -3012,12 +3027,15 @@ export class StoresService {
       }
 
       // Create and save assignment
-      // Auto-approve: ai đăng ký trước giành slot trước, không cần duyệt
+      // Staff self-registers → PENDING (needs owner approval)
+      // Owner assigns staff → APPROVED (owner already approved it)
       const assignment = manager.create(ShiftAssignment, {
         shiftSlotId: slotId,
         employeeId,
         note,
-        status: ShiftAssignmentStatus.APPROVED,
+        status: isOwnerAssign
+          ? ShiftAssignmentStatus.APPROVED
+          : ShiftAssignmentStatus.PENDING,
       });
       return manager.save(assignment);
     });
@@ -3034,7 +3052,9 @@ export class StoresService {
       .leftJoinAndSelect('slot.cycle', 'cycle')
       .leftJoinAndSelect('assignment.employee', 'employee')
       .leftJoinAndSelect('employee.account', 'account')
-      .where('cycle.storeId = :storeId', { storeId })
+      .where('(cycle.storeId = :storeId OR slot.storeId = :storeId)', {
+        storeId,
+      })
       .orderBy('assignment.createdAt', 'DESC');
 
     if (filters.cycleId) {
