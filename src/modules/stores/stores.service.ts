@@ -2901,9 +2901,7 @@ export class StoresService {
       .leftJoinAndSelect('assignment.employee', 'employee')
       .leftJoinAndSelect('employee.account', 'account')
       .leftJoin('slot.cycle', 'cycle')
-      .where('(cycle.storeId = :storeId OR slot.storeId = :storeId)', {
-        storeId,
-      })
+      .where('cycle.storeId = :storeId', { storeId })
       .orderBy('slot.workDate', 'ASC')
       .addOrderBy('workShift.startTime', 'ASC');
 
@@ -5194,7 +5192,8 @@ export class StoresService {
   async getEmployeeSalaries(employeeProfileId: string, month?: string) {
     const where: any = { employeeProfileId };
     if (month) {
-      where.month = month;
+      const [y, m] = month.split('-').map(Number);
+      where.month = new Date(y, m - 1, 1);
     }
     return this.employeeSalaryRepository.find({
       where,
