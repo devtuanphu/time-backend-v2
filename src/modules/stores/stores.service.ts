@@ -2965,36 +2965,43 @@ export class StoresService {
     isOwnerAssign = false,
   ) {
     return this.dataSource.transaction(async (manager) => {
-      // Lock the slot row to prevent race condition
+      // Step 1: Lock the slot row to prevent race condition (no joins, FOR UPDATE only works on non-nullable side)
       const slot = await manager
         .createQueryBuilder(ShiftSlot, 'slot')
         .setLock('pessimistic_write')
-        .leftJoinAndSelect('slot.assignments', 'assignment')
-        .leftJoinAndSelect('slot.cycle', 'cycle')
         .where('slot.id = :slotId', { slotId })
         .getOne();
 
       if (!slot) throw new NotFoundException('Shift slot not found');
 
+      // Step 2: Load cycle and assignments separately (now inside transaction)
+      const [cycle, assignments] = await Promise.all([
+        slot.cycleId
+          ? manager.findOne(WorkCycle, { where: { id: slot.cycleId } })
+          : Promise.resolve(null),
+        manager.find(ShiftAssignment, {
+          where: { shiftSlotId: slotId },
+        }),
+      ]);
+
       // Check if cycle is still active
-      if (slot.cycle && slot.cycle.status !== WorkCycleStatus.ACTIVE) {
+      if (cycle && cycle.status !== WorkCycleStatus.ACTIVE) {
         throw new BadRequestException('Chu kỳ không còn hoạt động');
       }
 
       // Check registration deadline
       const now = new Date();
       if (
-        slot.cycle?.registrationDeadline &&
-        now > new Date(slot.cycle.registrationDeadline)
+        cycle?.registrationDeadline &&
+        now > new Date(cycle.registrationDeadline)
       ) {
         throw new BadRequestException('Đã quá hạn đăng ký ca làm việc');
       }
 
       // Check capacity (null maxStaff = unlimited)
       const activeCount =
-        slot.assignments?.filter(
-          (a) => a.status !== ShiftAssignmentStatus.CANCELLED,
-        ).length || 0;
+        assignments.filter((a) => a.status !== ShiftAssignmentStatus.CANCELLED)
+          .length || 0;
 
       if (slot.maxStaff !== null && activeCount >= slot.maxStaff) {
         throw new BadRequestException('Ca đã đầy người');
