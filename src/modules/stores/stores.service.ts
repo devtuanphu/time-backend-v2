@@ -2964,79 +2964,72 @@ export class StoresService {
     note?: string,
     isOwnerAssign = false,
   ) {
-    // P0-3, P0-4, P0-5: Use transaction with pessimistic locking + deadline + cycle status check
-    return await this.dataSource.transaction(async (manager) => {
-      // Lock the slot row to prevent race condition
-      const slot = await manager
-        .createQueryBuilder(ShiftSlot, 'slot')
-        .setLock('pessimistic_write')
-        .leftJoinAndSelect('slot.assignments', 'assignment')
-        .leftJoinAndSelect('slot.cycle', 'cycle')
-        .where('slot.id = :slotId', { slotId })
-        .getOne();
+    // Lock the slot row to prevent race condition
+    const slot = await this.shiftSlotRepository
+      .createQueryBuilder('slot')
+      .setLock('pessimistic_write')
+      .leftJoinAndSelect('slot.assignments', 'assignment')
+      .leftJoinAndSelect('slot.cycle', 'cycle')
+      .where('slot.id = :slotId', { slotId })
+      .getOne();
 
-      if (!slot) throw new NotFoundException('Shift slot not found');
+    if (!slot) throw new NotFoundException('Shift slot not found');
 
-      // P0-5: Check if cycle is still active
-      if (slot.cycle && slot.cycle.status !== WorkCycleStatus.ACTIVE) {
-        throw new BadRequestException('Chu kỳ không còn hoạt động');
-      }
+    // Check if cycle is still active
+    if (slot.cycle && slot.cycle.status !== WorkCycleStatus.ACTIVE) {
+      throw new BadRequestException('Chu kỳ không còn hoạt động');
+    }
 
-      // P0-4: Check registration deadline
-      const now = new Date();
-      if (
-        slot.cycle?.registrationDeadline &&
-        now > new Date(slot.cycle.registrationDeadline)
-      ) {
-        throw new BadRequestException('Đã quá hạn đăng ký ca làm việc');
-      }
+    // Check registration deadline
+    const now = new Date();
+    if (
+      slot.cycle?.registrationDeadline &&
+      now > new Date(slot.cycle.registrationDeadline)
+    ) {
+      throw new BadRequestException('Đã quá hạn đăng ký ca làm việc');
+    }
 
-      // P0-3: Check capacity with lock held (prevents race condition)
-      // Bug 2.1 fix: Only count non-cancelled assignments
-      // null maxStaff = unlimited capacity
-      const activeCount =
-        slot.assignments?.filter(
-          (a) => a.status !== ShiftAssignmentStatus.CANCELLED,
-        ).length || 0;
+    // Check capacity (null maxStaff = unlimited)
+    const activeCount =
+      slot.assignments?.filter(
+        (a) => a.status !== ShiftAssignmentStatus.CANCELLED,
+      ).length || 0;
 
-      if (slot.maxStaff !== null && activeCount >= slot.maxStaff) {
-        throw new BadRequestException('Ca đã đầy người');
-      }
+    if (slot.maxStaff !== null && activeCount >= slot.maxStaff) {
+      throw new BadRequestException('Ca đã đầy người');
+    }
 
-      // Bug 2.3 fix: Check employee status
-      const employee = await manager.findOne(EmployeeProfile, {
-        where: { id: employeeId },
-      });
-      if (!employee) {
-        throw new NotFoundException('Không tìm thấy nhân viên');
-      }
-      if (employee.employmentStatus !== EmploymentStatus.ACTIVE) {
-        throw new BadRequestException(
-          'Nhân viên không còn hoạt động, không thể đăng ký ca',
-        );
-      }
-
-      // Check if employee already registered (exclude cancelled)
-      const existing = await manager.findOne(ShiftAssignment, {
-        where: { shiftSlotId: slotId, employeeId },
-      });
-      if (existing && existing.status !== ShiftAssignmentStatus.CANCELLED) {
-        throw new BadRequestException('Nhân viên đã đăng ký ca này');
-      }
-
-      // Create and save assignment
-      // Staff self-registers → PENDING (needs owner approval)
-      // Owner assigns staff → APPROVED (owner already approved it)
-      const assignment = manager.create(ShiftAssignment, {
-        shiftSlotId: slotId,
-        employeeId,
-        note,
-        status: isOwnerAssign
-          ? ShiftAssignmentStatus.APPROVED
-          : ShiftAssignmentStatus.PENDING,
-      });
-      return manager.save(assignment);
+    // Check employee status
+    const employee = await this.profileRepository.findOne({
+      where: { id: employeeId },
     });
+    if (!employee) {
+      throw new NotFoundException('Không tìm thấy nhân viên');
+    }
+    if (employee.employmentStatus !== EmploymentStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Nhân viên không còn hoạt động, không thể đăng ký ca',
+      );
+    }
+
+    // Check if employee already registered (exclude cancelled)
+    const existing = await this.shiftAssignmentRepository.findOne({
+      where: { shiftSlotId: slotId, employeeId },
+    });
+    if (existing && existing.status !== ShiftAssignmentStatus.CANCELLED) {
+      throw new BadRequestException('Nhân viên đã đăng ký ca này');
+    }
+
+    // Create and save assignment
+    const assignment = this.shiftAssignmentRepository.create({
+      shiftSlotId: slotId,
+      employeeId,
+      note,
+      status: isOwnerAssign
+        ? ShiftAssignmentStatus.APPROVED
+        : ShiftAssignmentStatus.PENDING,
+    });
+    return this.shiftAssignmentRepository.save(assignment);
   }
 
   async getShiftAssignments(
