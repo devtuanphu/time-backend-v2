@@ -1,6 +1,24 @@
 import { Entity, Column } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
-import { PaymentType } from './employee-contract.entity';
+
+export type TemplateFieldType =
+  | 'text'
+  | 'number'
+  | 'date'
+  | 'select'
+  | 'currency'
+  | 'textarea';
+
+export interface TemplateField {
+  key: string; // VD: "salary", "startDate", "position"
+  label: string; // VD: "Lương cơ bản"
+  type: TemplateFieldType;
+  placeholder?: string; // VD: "{{salary}}" - hiển thị trong file
+  options?: string[]; // cho type='select'
+  required?: boolean;
+  defaultValue?: string;
+  exampleValue?: string; // VD: "10.000.000 VNĐ/tháng"
+}
 
 @Entity('contract_templates')
 export class ContractTemplate extends BaseEntity {
@@ -13,43 +31,20 @@ export class ContractTemplate extends BaseEntity {
   @Column({ name: 'template_type', nullable: true })
   templateType: string;
 
-  @Column({ name: 'job_description', type: 'text', nullable: true })
-  jobDescription: string;
+  /** URL file template (PDF/DOCX) đã upload lên S3/minio */
+  @Column({ name: 'file_url', nullable: true })
+  fileUrl: string;
 
-  @Column({
-    name: 'weekly_working_hours',
-    type: 'decimal',
-    precision: 5,
-    scale: 2,
-    nullable: true,
-  })
-  weeklyWorkingHours: number;
+  /** Loại file: pdf | docx */
+  @Column({ name: 'file_type', nullable: true })
+  fileType: string;
 
-  @Column({ name: 'probation_period', nullable: true })
-  probationPeriod: string;
-
-  @Column({
-    name: 'payment_type',
-    type: 'enum',
-    enum: PaymentType,
-    nullable: true,
-  })
-  paymentType: PaymentType;
-
-  @Column({
-    name: 'salary_amount',
-    type: 'decimal',
-    precision: 12,
-    scale: 2,
-    default: 0,
-  })
-  salaryAmount: number;
-
+  /**
+   * Danh sách placeholder fields.
+   * VD: [{ key: "salary", label: "Lương", type: "currency" }, ...]
+   */
   @Column({ type: 'jsonb', nullable: true })
-  allowances: Record<string, number>;
-
-  @Column({ type: 'jsonb', nullable: true })
-  terms: Array<{ title: string; content: string }>;
+  fields: TemplateField[];
 
   @Column({ name: 'is_default', default: false })
   isDefault: boolean;

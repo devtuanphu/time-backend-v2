@@ -2,35 +2,91 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   IsString,
   IsOptional,
-  IsNumber,
-  IsEnum,
   IsBoolean,
   IsArray,
-  IsObject,
-  IsNotEmpty,
+  IsIn,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 import { PartialType } from '@nestjs/swagger';
-import { PaymentType } from '../entities/employee-contract.entity';
 
-export class ContractTemplateTermDto {
-  @ApiProperty({ example: 'Thời gian làm việc' })
-  @IsString()
-  @IsNotEmpty()
-  title: string;
+export const TEMPLATE_FIELD_TYPES = [
+  'text',
+  'number',
+  'date',
+  'select',
+  'currency',
+  'textarea',
+] as const;
+export type TemplateFieldTypeEnum = (typeof TEMPLATE_FIELD_TYPES)[number];
 
+export class TemplateFieldDto {
   @ApiProperty({
-    example: 'Nhân viên làm việc từ 8h00 đến 17h00 các ngày trong tuần',
+    example: 'salary',
+    description: 'Key duy nhất dùng để replace vào file',
   })
   @IsString()
-  @IsNotEmpty()
-  content: string;
+  key: string;
+
+  @ApiProperty({
+    example: 'Lương cơ bản',
+    description: 'Nhãn hiển thị cho manager',
+  })
+  @IsString()
+  label: string;
+
+  @ApiProperty({ example: 'currency', enum: TEMPLATE_FIELD_TYPES })
+  @IsString()
+  @IsIn(TEMPLATE_FIELD_TYPES)
+  type: TemplateFieldTypeEnum;
+
+  @ApiProperty({
+    example: '{{salary}}',
+    description: 'Placeholder trong file - sẽ được replace bằng giá trị thực',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  placeholder?: string;
+
+  @ApiProperty({
+    example: ['Tháng', 'Tuần', 'Ngày', 'Giờ', 'Ca'],
+    description: 'Các lựa chọn (chỉ dùng khi type=select)',
+    required: false,
+  })
+  @IsArray()
+  @IsOptional()
+  options?: string[];
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'Bắt buộc nhập khi fill contract',
+  })
+  @IsBoolean()
+  @IsOptional()
+  required?: boolean;
+
+  @ApiProperty({
+    example: '10.000.000 VNĐ',
+    description: 'Giá trị mặc định (nếu có)',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  defaultValue?: string;
+
+  @ApiProperty({
+    example: '10.000.000 VNĐ/tháng',
+    description: 'Ví dụ giá trị để manager biết format',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  exampleValue?: string;
 }
 
 export class CreateContractTemplateDto {
   @ApiProperty({ example: 'Hợp đồng Full-time' })
   @IsString()
-  @IsNotEmpty()
   templateName: string;
 
   @ApiProperty({ example: 'FULL_TIME', required: false })
@@ -39,48 +95,27 @@ export class CreateContractTemplateDto {
   templateType?: string;
 
   @ApiProperty({
-    example:
-      'Phục vụ khách hàng tại quán, pha chế đồ uống, vệ sinh khu vực làm việc.',
+    example: 'https://bucket.s3.amazonaws.com/contracts/template-1.pdf',
+    description: 'URL file template đã upload lên storage',
     required: false,
   })
   @IsString()
   @IsOptional()
-  jobDescription?: string;
+  fileUrl?: string;
 
-  @ApiProperty({ example: 44, required: false })
-  @IsNumber()
-  @IsOptional()
-  @Type(() => Number)
-  weeklyWorkingHours?: number;
-
-  @ApiProperty({ example: '1 tháng', required: false })
+  @ApiProperty({ example: 'pdf', enum: ['pdf', 'docx'], required: false })
   @IsString()
   @IsOptional()
-  probationPeriod?: string;
-
-  @ApiProperty({ example: 'Tháng', enum: PaymentType, required: false })
-  @IsEnum(PaymentType)
-  @IsOptional()
-  paymentType?: PaymentType;
-
-  @ApiProperty({ example: 10000000, required: false })
-  @IsNumber()
-  @IsOptional()
-  @Type(() => Number)
-  salaryAmount?: number;
+  fileType?: string;
 
   @ApiProperty({
-    example: { 'Phụ cấp ăn trưa': 500000, 'Phụ cấp xăng': 200000 },
+    type: [TemplateFieldDto],
+    description: 'Danh sách placeholder fields cần fill khi tạo hợp đồng',
     required: false,
   })
-  @IsObject()
-  @IsOptional()
-  allowances?: Record<string, number>;
-
-  @ApiProperty({ type: [ContractTemplateTermDto], required: false })
   @IsArray()
   @IsOptional()
-  terms?: ContractTemplateTermDto[];
+  fields?: TemplateFieldDto[];
 
   @ApiProperty({ example: false, required: false })
   @IsBoolean()
@@ -106,25 +141,13 @@ export class ContractTemplateResponseDto {
   templateType: string;
 
   @ApiProperty({ required: false })
-  jobDescription: string;
+  fileUrl: string;
 
   @ApiProperty({ required: false })
-  weeklyWorkingHours: number;
+  fileType: string;
 
-  @ApiProperty({ required: false })
-  probationPeriod: string;
-
-  @ApiProperty({ required: false })
-  paymentType: PaymentType;
-
-  @ApiProperty({ required: false })
-  salaryAmount: number;
-
-  @ApiProperty({ required: false })
-  allowances: Record<string, number>;
-
-  @ApiProperty({ type: [ContractTemplateTermDto], required: false })
-  terms: ContractTemplateTermDto[];
+  @ApiProperty({ type: [TemplateFieldDto], required: false })
+  fields: TemplateFieldDto[];
 
   @ApiProperty()
   isDefault: boolean;
