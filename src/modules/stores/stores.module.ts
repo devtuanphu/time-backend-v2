@@ -6,6 +6,7 @@ import { StoreRole } from './entities/store-role.entity';
 import { EmployeeProfile } from './entities/employee-profile.entity';
 import { EmployeeProfileRole } from './entities/employee-profile-role.entity';
 import { EmployeeContract } from './entities/employee-contract.entity';
+import { ContractTemplate } from './entities/contract-template.entity';
 import { WorkShift } from './entities/work-shift.entity';
 import { Asset } from './entities/asset.entity';
 import { Product } from './entities/product.entity';
@@ -17,8 +18,6 @@ import { ProductCategory } from './entities/product-category.entity';
 import { ProductStatus } from './entities/product-status.entity';
 import { AssetExportType } from './entities/asset-export-type.entity';
 import { ProductExportType } from './entities/product-export-type.entity';
-
-
 
 import { MonthlyPayroll } from './entities/monthly-payroll.entity';
 import { SalaryConfig } from './entities/salary-config.entity';
@@ -71,7 +70,6 @@ import { StorePermissionConfig } from './entities/store-permission-config.entity
 import { StoreShiftConfig } from './entities/store-shift-config.entity';
 import { Feedback } from './entities/feedback.entity';
 
-
 import { SalaryAdjustment } from './entities/salary-adjustment.entity';
 import { SalaryAdjustmentReason } from './entities/salary-adjustment-reason.entity';
 import { EmployeePaymentHistory } from './entities/employee-payment-history.entity';
@@ -99,6 +97,7 @@ import { FaceRecognitionService } from './face-recognition.service';
       EmployeeProfile,
       EmployeeProfileRole,
       EmployeeContract,
+      ContractTemplate,
       WorkShift,
       Asset,
       Product,
@@ -166,14 +165,17 @@ import { FaceRecognitionService } from './face-recognition.service';
       CronLock,
     ]),
 
-
-
     AccountsModule,
     MailModule,
     ScheduleModule.forRoot(),
   ],
   controllers: [StoresController, StoresPublicController],
-  providers: [StoresService, StoresCronService, DistributedLockService, FaceRecognitionService],
+  providers: [
+    StoresService,
+    StoresCronService,
+    DistributedLockService,
+    FaceRecognitionService,
+  ],
   exports: [StoresService, DistributedLockService],
 })
 export class StoresModule {}

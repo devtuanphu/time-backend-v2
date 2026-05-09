@@ -43,12 +43,11 @@ import { StoreProbationSettingDto } from './dto/store-probation-setting.dto';
 import { StoreApprovalSettingDto } from './dto/store-approval-setting.dto';
 import { StoreTimekeepingSettingDto } from './dto/store-timekeeping-setting.dto';
 import { UpdateStoreShiftConfigDto } from './dto/store-shift-config.dto';
-import { UpdateInternalRuleDto, InternalRuleResponseDto } from './dto/store-internal-rule.dto';
+import {
+  UpdateInternalRuleDto,
+  InternalRuleResponseDto,
+} from './dto/store-internal-rule.dto';
 import { StorePermissionConfigDto } from './dto/store-permission-config.dto';
-
-
-
-
 
 import {
   CreateServiceItemDto,
@@ -58,6 +57,11 @@ import {
   CreatePersonalCareItemDto,
   CreatePetCareItemDto,
 } from './dto/order-management.dto';
+import {
+  ContractTemplateResponseDto,
+  CreateContractTemplateDto,
+  UpdateContractTemplateDto,
+} from './dto/contract-template.dto';
 import {
   StoreResponseDto,
   EmployeeTypeResponseDto,
@@ -91,7 +95,6 @@ import {
   UpdateDetailsContractDto,
   CreateStoreSkillDto,
   UpdateStoreSkillDto,
-
   StoreSkillResponseDto,
   CreateStorePayrollPaymentDto,
   UpdateStorePayrollPaymentDto,
@@ -102,13 +105,23 @@ import {
   UpdatePersonalInfoDto,
 } from './dto/store-response.dto';
 
-
-import { CreateSalaryConfigDto, UpdateSalaryConfigDto } from './dto/salary-config.dto';
-import { CreateSalaryAdjustmentDto, SalaryAdjustmentResponseDto } from './dto/salary-adjustment.dto';
+import {
+  CreateSalaryConfigDto,
+  UpdateSalaryConfigDto,
+} from './dto/salary-config.dto';
+import {
+  CreateSalaryAdjustmentDto,
+  SalaryAdjustmentResponseDto,
+} from './dto/salary-adjustment.dto';
 import { ConfigStatus } from './entities/salary-config.entity';
 import { ShiftChangeRequestStatus } from './entities/shift-change-request.entity';
 import { BonusWorkRequestStatus } from './entities/bonus-work-request.entity';
-import { AssignAssetDto, ReturnAssetDto, ExchangeAssetDto, ReassignAssetDto } from './dto/employee-asset.dto';
+import {
+  AssignAssetDto,
+  ReturnAssetDto,
+  ExchangeAssetDto,
+  ReassignAssetDto,
+} from './dto/employee-asset.dto';
 import {
   FileFieldsInterceptor,
   FileInterceptor,
@@ -119,7 +132,6 @@ import { multerConfig } from '../../common/utils/multer-config';
 import { AssetMultipartInterceptor } from './interceptors/asset-multipart.interceptor';
 import { ProductMultipartInterceptor } from './interceptors/product-multipart.interceptor';
 import { UpdatePayrollSettingDto } from './dto/store-payroll-setting.dto';
-
 
 import { StoreEventType } from './entities/store-event.entity';
 import { KpiStatus } from './entities/employee-kpi.entity';
@@ -150,23 +162,23 @@ export class StoresController {
     type: StoreResponseDto,
   })
   async create(
-    @GetUser() user: any, 
+    @GetUser() user: any,
     @Body() body: CreateStoreDto,
-    @UploadedFile() file?: Express.Multer.File
+    @UploadedFile() file?: Express.Multer.File,
   ) {
-    const storeData: any = { 
-      ...body, 
-      ownerAccountId: user.userId 
+    const storeData: any = {
+      ...body,
+      ownerAccountId: user.userId,
     };
-    
+
     // Handle avatar upload
     if (file) {
       storeData.avatarUrl = `/uploads/${file.filename}`;
     }
-    
+
     // Remove the avatar field from body to avoid TypeORM errors
     delete storeData.avatar;
-    
+
     return this.storesService.create(storeData);
   }
 
@@ -186,20 +198,40 @@ export class StoresController {
   }
 
   @Get('monthly-salary-fund')
-  @ApiOperation({ summary: 'Lấy tổng quỹ lương và dự kiến cần trả của tất cả stores theo tháng' })
-  @ApiQuery({ name: 'date', required: true, example: '04/2026', description: 'Tháng cần lấy báo cáo (MM/YYYY)' })
+  @ApiOperation({
+    summary:
+      'Lấy tổng quỹ lương và dự kiến cần trả của tất cả stores theo tháng',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: true,
+    example: '04/2026',
+    description: 'Tháng cần lấy báo cáo (MM/YYYY)',
+  })
   @ApiResponse({ status: 200, type: MonthlySalaryFundResponseDto })
-  async getMonthlySalaryFund(@GetUser() user: any, @Query('date') date: string) {
+  async getMonthlySalaryFund(
+    @GetUser() user: any,
+    @Query('date') date: string,
+  ) {
     return this.storesService.getMonthlySalaryFund(user.userId, date);
   }
 
   @Get('staff')
   @ApiOperation({
     summary: 'Lấy danh sách nhân viên của toàn bộ cửa hàng hoặc theo Store ID',
-    description: 'Nếu storeId không được truyền, hệ thống sẽ lấy toàn bộ nhân viên thuộc tất cả cửa hàng của Owner.',
+    description:
+      'Nếu storeId không được truyền, hệ thống sẽ lấy toàn bộ nhân viên thuộc tất cả cửa hàng của Owner.',
   })
-  @ApiQuery({ name: 'storeId', required: false, description: 'ID của cửa hàng' })
-  @ApiQuery({ name: 'typeName', required: false, description: 'Lọc theo loại hình (Full-time, Part-time...)' })
+  @ApiQuery({
+    name: 'storeId',
+    required: false,
+    description: 'ID của cửa hàng',
+  })
+  @ApiQuery({
+    name: 'typeName',
+    required: false,
+    description: 'Lọc theo loại hình (Full-time, Part-time...)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Danh sách nhân viên và thống kê tổng hợp',
@@ -214,7 +246,12 @@ export class StoresController {
     // Sanitize storeId if it contains query string characters (handle manual entry errors)
     const sanitizedStoreId = storeId?.split('?')[0];
     const isDeletedBool = isDeleted === 'true';
-    return this.storesService.getEmployees(user.userId, sanitizedStoreId, typeName, isDeletedBool);
+    return this.storesService.getEmployees(
+      user.userId,
+      sanitizedStoreId,
+      typeName,
+      isDeletedBool,
+    );
   }
 
   // Employee KPI Management
@@ -230,18 +267,20 @@ export class StoresController {
     @Query('employeeProfileId') employeeProfileId?: string,
     @Query('storeId') storeId?: string,
     @Query('month') month?: string,
-    @Query('rating') rating?: string
+    @Query('rating') rating?: string,
   ) {
-    return this.storesService.getEmployeeKpis({ 
-      employeeProfileId, 
-      storeId, 
-      month, 
-      rating 
+    return this.storesService.getEmployeeKpis({
+      employeeProfileId,
+      storeId,
+      month,
+      rating,
     });
   }
 
   @Patch('employee-kpis/:id/status')
-  @ApiOperation({ summary: 'Cập nhật trạng thái bảng KPI (Tạm dừng, Đang áp dụng...)' })
+  @ApiOperation({
+    summary: 'Cập nhật trạng thái bảng KPI (Tạm dừng, Đang áp dụng...)',
+  })
   async updateEmployeeKpiStatus(
     @Param('id') id: string,
     @Body('status') status: KpiStatus,
@@ -263,20 +302,33 @@ export class StoresController {
 
   @Patch('employee-kpis/:id/reminders')
   @ApiOperation({ summary: 'Cập nhật lời nhắc nhở cho KPI' })
-  async updateKpiReminders(@Param('id') id: string, @Body('reminders') reminders: string) {
+  async updateKpiReminders(
+    @Param('id') id: string,
+    @Body('reminders') reminders: string,
+  ) {
     return this.storesService.updateKpiReminders(id, reminders);
   }
 
   @Patch('employee-kpis/:id/compliments')
   @ApiOperation({ summary: 'Gửi lời khen cho nhân viên qua KPI' })
-  async updateKpiCompliments(@Param('id') id: string, @Body('compliments') compliments: string) {
+  async updateKpiCompliments(
+    @Param('id') id: string,
+    @Body('compliments') compliments: string,
+  ) {
     return this.storesService.updateKpiCompliments(id, compliments);
   }
 
   // KPI Approval Requests
   @Post('kpi-approval-requests')
   @ApiOperation({ summary: 'Nhân viên gửi yêu cầu duyệt bảng KPI' })
-  async createKpiApprovalRequest(@Body() body: { employeeProfileId: string; employeeKpiId: string; note?: string }) {
+  async createKpiApprovalRequest(
+    @Body()
+    body: {
+      employeeProfileId: string;
+      employeeKpiId: string;
+      note?: string;
+    },
+  ) {
     return this.storesService.createKpiApprovalRequest(body);
   }
 
@@ -294,7 +346,7 @@ export class StoresController {
   async handleKpiApprovalRequest(
     @Param('id') id: string,
     @GetUser() user: any,
-    @Body() body: { status: KpiRequestStatus; note?: string }
+    @Body() body: { status: KpiRequestStatus; note?: string },
   ) {
     // Giả định user.userId là accountId, cần tìm profile tương ứng của reviewer
     // Tuy nhiên để đơn giản trong luồng này, ta có thể log thông tin reviewer
@@ -352,7 +404,9 @@ export class StoresController {
   }
 
   @Get('personal-care-items')
-  @ApiOperation({ summary: 'Lấy danh sách dịch vụ Spa/Personal Care kèm thống kê' })
+  @ApiOperation({
+    summary: 'Lấy danh sách dịch vụ Spa/Personal Care kèm thống kê',
+  })
   async getPersonalCareItems(
     @Query('storeId') storeId: string,
     @Query('categoryId') categoryId?: string,
@@ -397,7 +451,11 @@ export class StoresController {
     @Query('employeeProfileId') employeeProfileId?: string,
     @Query('status') status?: string,
   ) {
-    return this.storesService.getFeedbacks({ storeId, employeeProfileId, status: status as any });
+    return this.storesService.getFeedbacks({
+      storeId,
+      employeeProfileId,
+      status: status as any,
+    });
   }
 
   @Get('feedbacks/leaderboard')
@@ -418,7 +476,11 @@ export class StoresController {
     @Query('employeeProfileId') employeeProfileId?: string,
     @Query('status') status?: string,
   ) {
-    return this.storesService.getShiftRegistrations({ storeId, employeeProfileId, status });
+    return this.storesService.getShiftRegistrations({
+      storeId,
+      employeeProfileId,
+      status,
+    });
   }
 
   // KPI Task Management (MUST be above @Get(':id') to avoid route collision)
@@ -450,7 +512,8 @@ export class StoresController {
     return this.storesService.getKpiTasks({
       employeeKpiId,
       storeId,
-      isHidden: isHidden === 'true' ? true : isHidden === 'false' ? false : undefined,
+      isHidden:
+        isHidden === 'true' ? true : isHidden === 'false' ? false : undefined,
     });
   }
 
@@ -498,10 +561,7 @@ export class StoresController {
     summary: 'Reverse geocode (lat/lng → address)',
     description: 'Proxy API — Google Maps key stays server-side',
   })
-  async geocodeReverse(
-    @Query('lat') lat: string,
-    @Query('lng') lng: string,
-  ) {
+  async geocodeReverse(@Query('lat') lat: string, @Query('lng') lng: string) {
     if (!lat || !lng) throw new BadRequestException('lat and lng are required');
     return this.storesService.geocodeReverse(parseFloat(lat), parseFloat(lng));
   }
@@ -543,7 +603,8 @@ export class StoresController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Cập nhật thông tin cửa hàng',
-    description: 'Chủ sở hữu hoặc Quản lý cập nhật thông tin cửa hàng (bao gồm ảnh đại diện)',
+    description:
+      'Chủ sở hữu hoặc Quản lý cập nhật thông tin cửa hàng (bao gồm ảnh đại diện)',
   })
   @ApiResponse({
     status: 200,
@@ -553,18 +614,18 @@ export class StoresController {
   async updateStore(
     @Param('id') id: string,
     @Body() body: any,
-    @UploadedFile() file?: Express.Multer.File
+    @UploadedFile() file?: Express.Multer.File,
   ) {
     const storeData: any = { ...body };
-    
+
     // Handle avatar upload
     if (file) {
       storeData.avatarUrl = `/uploads/${file.filename}`;
     }
-    
+
     // Remove the avatar field from body to avoid TypeORM errors
     delete storeData.avatar;
-    
+
     return this.storesService.updateStore(id, storeData);
   }
 
@@ -649,13 +710,13 @@ export class StoresController {
     return this.storesService.updateRolePermissionConfig(id, roleId, body);
   }
 
-
-
-
   // Termination Reasons
   @Post(':id/termination-reasons')
   @ApiOperation({ summary: 'Tạo lý do thôi việc' })
-  async createTerminationReason(@Param('id') id: string, @Body('name') name: string) {
+  async createTerminationReason(
+    @Param('id') id: string,
+    @Body('name') name: string,
+  ) {
     return this.storesService.createTerminationReason(id, name);
   }
 
@@ -667,7 +728,10 @@ export class StoresController {
 
   @Put('termination-reasons/:reasonId')
   @ApiOperation({ summary: 'Cập nhật lý do thôi việc' })
-  async updateTerminationReason(@Param('reasonId') reasonId: string, @Body('name') name: string) {
+  async updateTerminationReason(
+    @Param('reasonId') reasonId: string,
+    @Body('name') name: string,
+  ) {
     return this.storesService.updateTerminationReason(reasonId, name);
   }
 
@@ -715,7 +779,9 @@ export class StoresController {
 
   @Post('employees/:profileId/skill')
   @ApiOperation({ summary: 'Gắn kỹ năng cho nhân viên' })
-  @ApiBody({ schema: { properties: { skillId: { type: 'string', nullable: true } } } })
+  @ApiBody({
+    schema: { properties: { skillId: { type: 'string', nullable: true } } },
+  })
   @ApiResponse({ status: 200 })
   async assignSkillToEmployee(
     @Param('profileId') profileId: string,
@@ -740,7 +806,10 @@ export class StoresController {
 
   @Put(':id/probation-settings')
   @ApiOperation({ summary: 'Cập nhật cấu hình lộ trình thử việc' })
-  async updateProbationSetting(@Param('id') id: string, @Body() body: StoreProbationSettingDto) {
+  async updateProbationSetting(
+    @Param('id') id: string,
+    @Body() body: StoreProbationSettingDto,
+  ) {
     return this.storesService.upsertProbationSetting(id, body);
   }
 
@@ -753,7 +822,10 @@ export class StoresController {
 
   @Put(':id/approval-settings')
   @ApiOperation({ summary: 'Cập nhật cấu hình phê duyệt' })
-  async updateApprovalSetting(@Param('id') id: string, @Body() body: StoreApprovalSettingDto) {
+  async updateApprovalSetting(
+    @Param('id') id: string,
+    @Body() body: StoreApprovalSettingDto,
+  ) {
     return this.storesService.upsertApprovalSetting(id, body);
   }
 
@@ -766,7 +838,10 @@ export class StoresController {
 
   @Put(':id/timekeeping-settings')
   @ApiOperation({ summary: 'Cập nhật cấu hình chấm công' })
-  async updateTimekeepingSetting(@Param('id') id: string, @Body() body: StoreTimekeepingSettingDto) {
+  async updateTimekeepingSetting(
+    @Param('id') id: string,
+    @Body() body: StoreTimekeepingSettingDto,
+  ) {
     return this.storesService.upsertTimekeepingSetting(id, body);
   }
 
@@ -779,10 +854,12 @@ export class StoresController {
 
   @Put(':id/shift-config')
   @ApiOperation({ summary: 'Cập nhật cấu hình ca làm việc' })
-  async updateShiftConfig(@Param('id') id: string, @Body() body: UpdateStoreShiftConfigDto) {
+  async updateShiftConfig(
+    @Param('id') id: string,
+    @Body() body: UpdateStoreShiftConfigDto,
+  ) {
     return this.storesService.upsertShiftConfig(id, body);
   }
-
 
   // Payroll Settings
   @Get(':id/payroll-settings')
@@ -793,12 +870,12 @@ export class StoresController {
 
   @Put(':id/payroll-settings')
   @ApiOperation({ summary: 'Cập nhật cấu hình tính lương' })
-  async updatePayrollSetting(@Param('id') id: string, @Body() body: UpdatePayrollSettingDto) {
+  async updatePayrollSetting(
+    @Param('id') id: string,
+    @Body() body: UpdatePayrollSettingDto,
+  ) {
     return this.storesService.upsertPayrollSetting(id, body);
   }
-
-
-
 
   // Employees
   @Post(':id/employees')
@@ -821,7 +898,11 @@ export class StoresController {
 
   @Get(':id/employees')
   @ApiOperation({ summary: 'Lấy danh sách nhân viên của cửa hàng' })
-  @ApiQuery({ name: 'typeName', required: false, description: 'Lọc theo tên loại hình nhân viên (VD: Full-time, Part-time)' })
+  @ApiQuery({
+    name: 'typeName',
+    required: false,
+    description: 'Lọc theo tên loại hình nhân viên (VD: Full-time, Part-time)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Danh sách nhân viên và thống kê tổng hợp',
@@ -835,7 +916,12 @@ export class StoresController {
   ) {
     const sanitizedId = id?.split('?')[0];
     const isDeletedBool = isDeleted === 'true';
-    return this.storesService.getEmployees(user.userId, sanitizedId, typeName, isDeletedBool);
+    return this.storesService.getEmployees(
+      user.userId,
+      sanitizedId,
+      typeName,
+      isDeletedBool,
+    );
   }
 
   @Post('employees/manual')
@@ -942,7 +1028,8 @@ export class StoresController {
   @Get(':id/me/personal-info')
   @ApiOperation({
     summary: 'Lấy thông tin cá nhân của người dùng tại cửa hàng hiện tại',
-    description: 'Lấy các thông tin cá nhân như Họ tên, Giới tính, CCCD, Ngân hàng... theo ngữ cảnh của cửa hàng (Role và StoreName)',
+    description:
+      'Lấy các thông tin cá nhân như Họ tên, Giới tính, CCCD, Ngân hàng... theo ngữ cảnh của cửa hàng (Role và StoreName)',
   })
   @ApiResponse({
     status: 200,
@@ -950,7 +1037,10 @@ export class StoresController {
     type: EmployeePersonalInfoResponseDto,
   })
   async getMyPersonalInfo(@GetUser() user: any, @Param('id') id: string) {
-    const result = await this.storesService.getMyPersonalInfoInStore(id, user.userId);
+    const result = await this.storesService.getMyPersonalInfoInStore(
+      id,
+      user.userId,
+    );
     if (!result) {
       throw new NotFoundException('Không tìm thấy thông tin');
     }
@@ -958,15 +1048,21 @@ export class StoresController {
   }
 
   @Put(':id/me/personal-info')
-  @UseInterceptors(FileFieldsInterceptor([
-    { name: 'avatar', maxCount: 1 },
-    { name: 'frontImage', maxCount: 1 },
-    { name: 'backImage', maxCount: 1 },
-  ], multerConfig))
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'avatar', maxCount: 1 },
+        { name: 'frontImage', maxCount: 1 },
+        { name: 'backImage', maxCount: 1 },
+      ],
+      multerConfig,
+    ),
+  )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Cập nhật thông tin cá nhân của người dùng hiện tại (kèm ảnh)',
-    description: 'Cập nhật các trường thông tin Họ tên, SĐT, Email, CCCD, Ngân hàng và tải lên ảnh avatar, CCCD mặt trước/sau.',
+    description:
+      'Cập nhật các trường thông tin Họ tên, SĐT, Email, CCCD, Ngân hàng và tải lên ảnh avatar, CCCD mặt trước/sau.',
   })
   @ApiResponse({
     status: 200,
@@ -975,25 +1071,28 @@ export class StoresController {
   async updateMyPersonalInfo(
     @GetUser() user: any,
     @Body() body: UpdatePersonalInfoDto,
-    @UploadedFiles() files: { avatar?: Express.Multer.File[], frontImage?: Express.Multer.File[], backImage?: Express.Multer.File[] }
+    @UploadedFiles()
+    files: {
+      avatar?: Express.Multer.File[];
+      frontImage?: Express.Multer.File[];
+      backImage?: Express.Multer.File[];
+    },
   ) {
     const data: any = { ...body };
     if (files.avatar?.[0]) data.avatar = `/uploads/${files.avatar[0].filename}`;
-    if (files.frontImage?.[0]) data.frontImage = `/uploads/${files.frontImage[0].filename}`;
-    if (files.backImage?.[0]) data.backImage = `/uploads/${files.backImage[0].filename}`;
+    if (files.frontImage?.[0])
+      data.frontImage = `/uploads/${files.frontImage[0].filename}`;
+    if (files.backImage?.[0])
+      data.backImage = `/uploads/${files.backImage[0].filename}`;
 
     return this.storesService.updateMyPersonalInfoInStore(user.userId, data);
   }
 
-
-
-
-
-
   @Delete('employees/:profileId')
   @ApiOperation({
     summary: 'Xóa nhân viên (Soft Delete)',
-    description: 'Cập nhật trạng thái terminated và thực hiện soft delete nhân viên. Yêu cầu mật khẩu xác nhận.',
+    description:
+      'Cập nhật trạng thái terminated và thực hiện soft delete nhân viên. Yêu cầu mật khẩu xác nhận.',
   })
   @ApiResponse({
     status: 200,
@@ -1021,7 +1120,8 @@ export class StoresController {
   @Delete('employees/:profileId/permanent')
   @ApiOperation({
     summary: 'Xóa nhân viên vĩnh viễn',
-    description: 'Xóa hoàn toàn dữ liệu nhân viên khỏi hệ thống. Yêu cầu mật khẩu xác nhận.',
+    description:
+      'Xóa hoàn toàn dữ liệu nhân viên khỏi hệ thống. Yêu cầu mật khẩu xác nhận.',
   })
   @ApiResponse({
     status: 200,
@@ -1049,7 +1149,8 @@ export class StoresController {
   @Post('employees/:profileId/restore')
   @ApiOperation({
     summary: 'Khôi phục nhân viên',
-    description: 'Khôi phục nhân viên đã bị soft delete quay lại trạng thái active.',
+    description:
+      'Khôi phục nhân viên đã bị soft delete quay lại trạng thái active.',
   })
   @ApiResponse({
     status: 200,
@@ -1062,7 +1163,8 @@ export class StoresController {
   @Get('employees/:profileId/performance')
   @ApiOperation({
     summary: 'Lấy báo cáo hiệu suất và lộ trình thăng tiến của nhân viên',
-    description: 'Bao gồm điểm hiệu suất, giờ làm, KPI, thâm niên và lộ trình thăng tiến sắp tới',
+    description:
+      'Bao gồm điểm hiệu suất, giờ làm, KPI, thâm niên và lộ trình thăng tiến sắp tới',
   })
   @ApiResponse({
     status: 200,
@@ -1076,7 +1178,8 @@ export class StoresController {
   @Get('employees/:profileId/progression')
   @ApiOperation({
     summary: 'Lấy lộ trình thăng tiến chi tiết',
-    description: 'Trả về danh sách các giai đoạn thăng tiến, yêu cầu và tiến độ hiện tại',
+    description:
+      'Trả về danh sách các giai đoạn thăng tiến, yêu cầu và tiến độ hiện tại',
   })
   @ApiResponse({
     status: 200,
@@ -1090,7 +1193,8 @@ export class StoresController {
   @Post('employees/contracts/:contractId/renew')
   @ApiOperation({
     summary: 'Gia hạn hợp đồng',
-    description: 'Archive hợp đồng cũ và tạo hợp đồng mới với thông tin cập nhật',
+    description:
+      'Archive hợp đồng cũ và tạo hợp đồng mới với thông tin cập nhật',
   })
   @ApiResponse({
     status: 201,
@@ -1107,7 +1211,8 @@ export class StoresController {
   @Put('employees/contracts/:contractId')
   @ApiOperation({
     summary: 'Cập nhật thông tin hợp đồng',
-    description: 'Chỉnh sửa trực tiếp thông tin trên hợp đồng (Sửa sai, bổ sung thông tin)',
+    description:
+      'Chỉnh sửa trực tiếp thông tin trên hợp đồng (Sửa sai, bổ sung thông tin)',
   })
   @ApiResponse({
     status: 200,
@@ -1124,14 +1229,20 @@ export class StoresController {
   @Get('employees/:profileId/schedule')
   @ApiOperation({
     summary: 'Lấy lịch làm việc chi tiết (Tháng hiện tại)',
-    description: 'Bao gồm: Lịch ca làm, Danh sách đăng ký ca, Đổi ca, và Nghỉ phép',
+    description:
+      'Bao gồm: Lịch ca làm, Danh sách đăng ký ca, Đổi ca, và Nghỉ phép',
   })
   @ApiResponse({
     status: 200,
     description: 'Chi tiết lịch làm việc',
     type: EmployeeScheduleDetailsDto,
   })
-  @ApiQuery({ name: 'month', required: false, type: String, description: 'YYYY-MM-DD (Mặc định là tháng hiện tại)' })
+  @ApiQuery({
+    name: 'month',
+    required: false,
+    type: String,
+    description: 'YYYY-MM-DD (Mặc định là tháng hiện tại)',
+  })
   async getEmployeeSchedule(
     @Param('profileId') profileId: string,
     @Query('month') monthString?: string,
@@ -1158,7 +1269,8 @@ export class StoresController {
     const accountId = req.user?.userId || req.user?.id;
     let managerProfileId = 'unknown';
     if (accountId) {
-      const profile = await this.storesService.getEmployeeByAccountId(accountId);
+      const profile =
+        await this.storesService.getEmployeeByAccountId(accountId);
       if (profile) managerProfileId = profile.id;
     }
 
@@ -1167,17 +1279,17 @@ export class StoresController {
       requestId,
       body.type,
       body.status,
-      body.reason
+      body.reason,
     );
   }
-
 
   // --- Employee Asset Management ---
 
   @Get('employees/:profileId/assets')
   @ApiOperation({
     summary: 'Lấy danh sách tài sản của nhân viên',
-    description: 'Lấy các tài sản đang được cấp phát cho nhân viên theo profileId',
+    description:
+      'Lấy các tài sản đang được cấp phát cho nhân viên theo profileId',
   })
   async getEmployeeAssets(@Param('profileId') profileId: string) {
     return this.storesService.getEmployeeAssets(profileId);
@@ -1194,7 +1306,7 @@ export class StoresController {
     @Req() req,
   ) {
     // Temporal manager ID
-    const managerProfileId = 'ec7e3feb-985c-416a-870c-88c470a17ac6'; 
+    const managerProfileId = 'ec7e3feb-985c-416a-870c-88c470a17ac6';
     return this.storesService.assignAssetToEmployee(
       profileId,
       body.assetId,
@@ -1208,7 +1320,8 @@ export class StoresController {
   @Put('employees/assets/:assignmentId/exchange')
   @ApiOperation({
     summary: 'Đổi tài sản (Trả A lấy B)',
-    description: 'Thu hồi tài sản đang sử dụng và cấp phát tài sản mới cho nhân viên',
+    description:
+      'Thu hồi tài sản đang sử dụng và cấp phát tài sản mới cho nhân viên',
   })
   async exchangeAsset(
     @Param('assignmentId') assignmentId: string,
@@ -1229,7 +1342,8 @@ export class StoresController {
   @Put('employees/assets/:assignmentId/return')
   @ApiOperation({
     summary: 'Thu hồi tài sản',
-    description: 'Cập nhật trạng thái thu hồi tài sản và hoàn lại tồn kho nếu cần',
+    description:
+      'Cập nhật trạng thái thu hồi tài sản và hoàn lại tồn kho nếu cần',
   })
   async returnAsset(
     @Param('assignmentId') assignmentId: string,
@@ -1245,7 +1359,8 @@ export class StoresController {
   @Post('employees/assets/:assignmentId/reassign')
   @ApiOperation({
     summary: 'Cấp lại tài sản',
-    description: 'Cấp lại một tài sản đã từng được thu hồi trước đó cho nhân viên',
+    description:
+      'Cấp lại một tài sản đã từng được thu hồi trước đó cho nhân viên',
   })
   async reassignAsset(
     @Param('assignmentId') assignmentId: string,
@@ -1263,9 +1378,10 @@ export class StoresController {
   }
 
   @Post('employees/basic-info')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Lấy thông tin cơ bản của danh sách nhân viên',
-    description: 'Truyền vào mảng IDs để lấy Tên, Ảnh, Vai trò và Loại nhân viên'
+    description:
+      'Truyền vào mảng IDs để lấy Tên, Ảnh, Vai trò và Loại nhân viên',
   })
   @ApiBody({
     schema: {
@@ -1274,10 +1390,10 @@ export class StoresController {
         ids: {
           type: 'array',
           items: { type: 'string' },
-          example: ['eb3c9aaa-099e-4425-a12e-02f6dc2672f4']
-        }
-      }
-    }
+          example: ['eb3c9aaa-099e-4425-a12e-02f6dc2672f4'],
+        },
+      },
+    },
   })
   @ApiResponse({
     status: 200,
@@ -1291,7 +1407,8 @@ export class StoresController {
   @Get(':id/employees/monthly-summaries')
   @ApiOperation({
     summary: 'Lấy thống kê tháng của nhân viên',
-    description: 'Lấy thống kê chấm công và lương tạm tính theo tháng cho tất cả nhân viên trong cửa hàng',
+    description:
+      'Lấy thống kê chấm công và lương tạm tính theo tháng cho tất cả nhân viên trong cửa hàng',
   })
   @ApiQuery({
     name: 'month',
@@ -1372,6 +1489,64 @@ export class StoresController {
     return this.storesService.getLatestContract(profileId);
   }
 
+  // ==================== CONTRACT TEMPLATES ====================
+  @Get(':id/contract-templates')
+  @ApiOperation({ summary: 'Lấy danh sách mẫu hợp đồng của cửa hàng' })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách mẫu hợp đồng',
+    type: [ContractTemplateResponseDto],
+  })
+  async getContractTemplates(@Param('id') id: string) {
+    return this.storesService.getContractTemplates(id);
+  }
+
+  @Get('contract-templates/:templateId')
+  @ApiOperation({ summary: 'Lấy thông tin một mẫu hợp đồng' })
+  @ApiResponse({
+    status: 200,
+    description: 'Thông tin mẫu hợp đồng',
+    type: ContractTemplateResponseDto,
+  })
+  async getContractTemplate(@Param('templateId') templateId: string) {
+    return this.storesService.getContractTemplate(templateId);
+  }
+
+  @Post(':id/contract-templates')
+  @ApiOperation({ summary: 'Tạo mẫu hợp đồng mới' })
+  @ApiResponse({
+    status: 201,
+    description: 'Tạo thành công',
+    type: ContractTemplateResponseDto,
+  })
+  async createContractTemplate(
+    @Param('id') id: string,
+    @Body() body: CreateContractTemplateDto,
+  ) {
+    return this.storesService.createContractTemplate(id, body);
+  }
+
+  @Put('contract-templates/:templateId')
+  @ApiOperation({ summary: 'Cập nhật mẫu hợp đồng' })
+  @ApiResponse({
+    status: 200,
+    description: 'Cập nhật thành công',
+    type: ContractTemplateResponseDto,
+  })
+  async updateContractTemplate(
+    @Param('templateId') templateId: string,
+    @Body() body: UpdateContractTemplateDto,
+  ) {
+    return this.storesService.updateContractTemplate(templateId, body);
+  }
+
+  @Delete('contract-templates/:templateId')
+  @ApiOperation({ summary: 'Xóa mẫu hợp đồng (xóa mềm)' })
+  @ApiResponse({ status: 200, description: 'Xóa thành công' })
+  async deleteContractTemplate(@Param('templateId') templateId: string) {
+    return this.storesService.deleteContractTemplate(templateId);
+  }
+
   // Work Shifts
   @Post(':id/work-shifts')
   @ApiOperation({
@@ -1401,7 +1576,8 @@ export class StoresController {
   @Put(':storeId/work-shifts/:shiftId')
   @ApiOperation({
     summary: 'Cập nhật ca làm việc',
-    description: 'Cập nhật thông tin ca làm việc (tên, giờ bắt đầu, giờ kết thúc, ghi chú)',
+    description:
+      'Cập nhật thông tin ca làm việc (tên, giờ bắt đầu, giờ kết thúc, ghi chú)',
   })
   @ApiResponse({
     status: 200,
@@ -1419,9 +1595,9 @@ export class StoresController {
   // ==================== WORK CYCLE MANAGEMENT ====================
 
   @Get(':id/active-cycle')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Lấy chu kỳ đang hoạt động',
-    description: 'Mỗi cửa hàng chỉ có 1 chu kỳ active tại 1 thời điểm' 
+    description: 'Mỗi cửa hàng chỉ có 1 chu kỳ active tại 1 thời điểm',
   })
   @ApiResponse({ status: 200, description: 'Chu kỳ đang active hoặc null' })
   async getActiveCycle(@Param('id') storeId: string) {
@@ -1431,7 +1607,8 @@ export class StoresController {
   @Post(':id/work-cycles')
   @ApiOperation({
     summary: 'Tạo chu kỳ làm việc',
-    description: 'Tạo chu kỳ mới. Phải dừng chu kỳ cũ trước khi tạo mới. Hỗ trợ 4 loại: DAILY, WEEKLY, MONTHLY, INDEFINITE',
+    description:
+      'Tạo chu kỳ mới. Phải dừng chu kỳ cũ trước khi tạo mới. Hỗ trợ 4 loại: DAILY, WEEKLY, MONTHLY, INDEFINITE',
   })
   @ApiResponse({ status: 201, description: 'Tạo thành công' })
   async createWorkCycle(@Param('id') storeId: string, @Body() body: any) {
@@ -1447,7 +1624,10 @@ export class StoresController {
 
   @Get('work-cycles/:cycleId')
   @ApiOperation({ summary: 'Lấy chi tiết chu kỳ làm việc' })
-  @ApiResponse({ status: 200, description: 'Chi tiết chu kỳ với slots và assignments' })
+  @ApiResponse({
+    status: 200,
+    description: 'Chi tiết chu kỳ với slots và assignments',
+  })
   async getWorkCycleById(@Param('cycleId') cycleId: string) {
     return this.storesService.getWorkCycleById(cycleId);
   }
@@ -1455,17 +1635,15 @@ export class StoresController {
   @Put('work-cycles/:cycleId')
   @ApiOperation({ summary: 'Cập nhật chu kỳ làm việc' })
   @ApiResponse({ status: 200, description: 'Cập nhật thành công' })
-  async updateWorkCycle(
-    @Param('cycleId') cycleId: string,
-    @Body() body: any,
-  ) {
+  async updateWorkCycle(@Param('cycleId') cycleId: string, @Body() body: any) {
     return this.storesService.updateWorkCycle(cycleId, body);
   }
 
   @Put('work-cycles/:cycleId/stop')
   @ApiOperation({
     summary: 'Dừng chu kỳ làm việc',
-    description: 'Dừng chu kỳ ngay lập tức hoặc hẹn giờ dừng. Dữ liệu lịch sử được giữ lại.',
+    description:
+      'Dừng chu kỳ ngay lập tức hoặc hẹn giờ dừng. Dữ liệu lịch sử được giữ lại.',
   })
   @ApiResponse({ status: 200, description: 'Dừng thành công' })
   async stopWorkCycle(
@@ -1478,7 +1656,8 @@ export class StoresController {
   @Put('work-cycles/:cycleId/activate')
   @ApiOperation({
     summary: 'Kích hoạt chu kỳ làm việc',
-    description: 'Chuyển chu kỳ từ DRAFT sang ACTIVE. Kiểm tra không có chu kỳ khác đang active.',
+    description:
+      'Chuyển chu kỳ từ DRAFT sang ACTIVE. Kiểm tra không có chu kỳ khác đang active.',
   })
   @ApiResponse({ status: 200, description: 'Kích hoạt thành công' })
   async activateWorkCycle(@Param('cycleId') cycleId: string) {
@@ -1510,10 +1689,7 @@ export class StoresController {
   @Put('shift-slots/:slotId')
   @ApiOperation({ summary: 'Cập nhật slot ca' })
   @ApiResponse({ status: 200, description: 'Cập nhật thành công' })
-  async updateShiftSlot(
-    @Param('slotId') slotId: string,
-    @Body() body: any,
-  ) {
+  async updateShiftSlot(@Param('slotId') slotId: string, @Body() body: any) {
     return this.storesService.updateShiftSlot(slotId, body);
   }
 
@@ -1529,7 +1705,8 @@ export class StoresController {
   @Get(':id/store-shift-slots')
   @ApiOperation({
     summary: 'Lấy tất cả shift slots của cửa hàng (cho staff app lịch ca)',
-    description: 'Trả về tất cả slots với workShift info, assignments, capacity. Dùng cho staff app hiển thị lịch ca cửa hàng.',
+    description:
+      'Trả về tất cả slots với workShift info, assignments, capacity. Dùng cho staff app hiển thị lịch ca cửa hàng.',
   })
   @ApiQuery({ name: 'startDate', required: false, description: 'YYYY-MM-DD' })
   @ApiQuery({ name: 'endDate', required: false, description: 'YYYY-MM-DD' })
@@ -1551,22 +1728,38 @@ export class StoresController {
   @ApiResponse({ status: 201, description: 'Đăng ký thành công' })
   async registerToShiftSlot(
     @Param('slotId') slotId: string,
-    @Body() body: { employeeId: string; note?: string; isOwnerAssign?: boolean },
+    @Body()
+    body: { employeeId: string; note?: string; isOwnerAssign?: boolean },
   ) {
-    return this.storesService.registerToShiftSlot(slotId, body.employeeId, body.note, body.isOwnerAssign || false);
+    return this.storesService.registerToShiftSlot(
+      slotId,
+      body.employeeId,
+      body.note,
+      body.isOwnerAssign || false,
+    );
   }
 
   @Get(':id/shift-assignments')
   @ApiOperation({ summary: 'Lấy danh sách đăng ký ca của cửa hàng' })
-  @ApiQuery({ name: 'cycleId', required: false, description: 'Lọc theo chu kỳ' })
-  @ApiQuery({ name: 'status', required: false, description: 'Lọc theo trạng thái' })
+  @ApiQuery({
+    name: 'cycleId',
+    required: false,
+    description: 'Lọc theo chu kỳ',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'Lọc theo trạng thái',
+  })
   @ApiResponse({ status: 200, description: 'Danh sách đăng ký' })
   async getShiftAssignments(
     @Param('id') storeId: string,
     @Query('cycleId') cycleId?: string,
     @Query('status') status?: string,
   ) {
-    console.log(`[Controller getShiftAssignments] storeId=${storeId}, cycleId=${cycleId}, status=${status}`);
+    console.log(
+      `[Controller getShiftAssignments] storeId=${storeId}, cycleId=${cycleId}, status=${status}`,
+    );
     return this.storesService.getShiftAssignments(storeId, { cycleId, status });
   }
 
@@ -1580,7 +1773,11 @@ export class StoresController {
     @Param('assignmentId') assignmentId: string,
     @Body() body: { status: string; note?: string },
   ) {
-    return this.storesService.updateAssignmentStatus(assignmentId, body.status, body.note);
+    return this.storesService.updateAssignmentStatus(
+      assignmentId,
+      body.status,
+      body.note,
+    );
   }
 
   // ==================== SHIFT SWAP MANAGEMENT ====================
@@ -1605,7 +1802,11 @@ export class StoresController {
     @Param('swapId') swapId: string,
     @Body() body: { status: string; note?: string },
   ) {
-    return this.storesService.updateShiftSwapStatus(swapId, body.status, body.note);
+    return this.storesService.updateShiftSwapStatus(
+      swapId,
+      body.status,
+      body.note,
+    );
   }
 
   // Assets
@@ -1615,26 +1816,26 @@ export class StoresController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Thêm tài sản (Bulk Create)',
-    description: 'Thêm một hoặc nhiều tài sản cùng lúc kèm ảnh (avatar_0, invoice_0...)',
+    description:
+      'Thêm một hoặc nhiều tài sản cùng lúc kèm ảnh (avatar_0, invoice_0...)',
   })
   @ApiResponse({
     status: 201,
     description: 'Tài sản được tạo thành công',
     type: AssetResponseDto,
   })
-  async uploadStoreAssetsBulk(
-    @Param('id') id: string,
-    @Req() req: any,
-  ) {
+  async uploadStoreAssetsBulk(@Param('id') id: string, @Req() req: any) {
     const assetsStr = req.body?.assets;
     const files = req.files || [];
-    
+
     let assetsData = [];
     try {
       assetsData = JSON.parse(assetsStr);
       if (!Array.isArray(assetsData)) throw new Error();
     } catch (e) {
-      throw new BadRequestException('Trường "assets" phải là một chuỗi JSON Array hợp lệ');
+      throw new BadRequestException(
+        'Trường "assets" phải là một chuỗi JSON Array hợp lệ',
+      );
     }
 
     return this.storesService.createAssetsBulk(id, assetsData, files);
@@ -1659,7 +1860,10 @@ export class StoresController {
     @Query('assetExportTypeId') assetExportTypeId?: string,
   ) {
     if (!storeId) throw new BadRequestException('storeId là bắt buộc');
-    return this.storesService.getAssetExportReport(storeId, { date, assetExportTypeId });
+    return this.storesService.getAssetExportReport(storeId, {
+      date,
+      assetExportTypeId,
+    });
   }
 
   // --- Hàng hóa (Product) Reports ---
@@ -1672,7 +1876,10 @@ export class StoresController {
     @Query('productStatusId') productStatusId?: string,
   ) {
     if (!storeId) throw new BadRequestException('storeId là bắt buộc');
-    return this.storesService.getProductReport(storeId, { date, productStatusId });
+    return this.storesService.getProductReport(storeId, {
+      date,
+      productStatusId,
+    });
   }
 
   @Get('products/export-report')
@@ -1683,7 +1890,10 @@ export class StoresController {
     @Query('productExportTypeId') productExportTypeId?: string,
   ) {
     if (!storeId) throw new BadRequestException('storeId là bắt buộc');
-    return this.storesService.getProductExportReport(storeId, { date, productExportTypeId });
+    return this.storesService.getProductExportReport(storeId, {
+      date,
+      productExportTypeId,
+    });
   }
 
   @Get(':id/product-export-types')
@@ -1714,7 +1924,9 @@ export class StoresController {
       try {
         data = { items: JSON.parse(body.items) };
       } catch (e) {
-        throw new BadRequestException('Trường "items" phải là một chuỗi JSON Array hợp lệ');
+        throw new BadRequestException(
+          'Trường "items" phải là một chuỗi JSON Array hợp lệ',
+        );
       }
     }
     return this.storesService.exportProductsBulk(data, files);
@@ -1723,14 +1935,9 @@ export class StoresController {
   @Delete('stock-transactions/:transactionId')
   @ApiOperation({ summary: 'Xóa giao dịch kho và hoàn tác tồn kho' })
   @ApiResponse({ status: 200, description: 'Xóa thành công' })
-  async deleteStockTransaction(
-    @Param('transactionId') transactionId: string
-  ) {
+  async deleteStockTransaction(@Param('transactionId') transactionId: string) {
     return this.storesService.deleteStockTransaction(transactionId);
   }
-
-
-
 
   @Get(':id/asset-export-types')
   @ApiOperation({ summary: 'Lấy danh sách loại xuất kho tài sản' })
@@ -1762,14 +1969,14 @@ export class StoresController {
       try {
         data.items = JSON.parse(data.items);
       } catch (e) {
-        throw new BadRequestException('Trường "items" phải là một chuỗi JSON Array hợp lệ');
+        throw new BadRequestException(
+          'Trường "items" phải là một chuỗi JSON Array hợp lệ',
+        );
       }
     }
 
     return this.storesService.exportAssetsBulk(data, files);
   }
-
-
 
   @Get(':id/assets')
   @ApiOperation({ summary: 'Lấy danh sách tài sản' })
@@ -1832,31 +2039,30 @@ export class StoresController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Thêm hàng hóa (Bulk Create)',
-    description: 'Thêm một hoặc nhiều hàng hóa cùng lúc kèm ảnh (avatar_0, avatar_1...)',
+    description:
+      'Thêm một hoặc nhiều hàng hóa cùng lúc kèm ảnh (avatar_0, avatar_1...)',
   })
   @ApiResponse({
     status: 201,
     description: 'Hàng hóa được tạo thành công',
     type: [ProductResponseDto],
   })
-  async createProduct(
-    @Param('id') id: string,
-    @Req() req: any,
-  ) {
+  async createProduct(@Param('id') id: string, @Req() req: any) {
     const productsStr = req.body?.products;
     const files = req.files || [];
-    
+
     let productsData = [];
     try {
       productsData = JSON.parse(productsStr);
       if (!Array.isArray(productsData)) throw new Error();
     } catch (e) {
-      throw new BadRequestException('Trường "products" phải là một chuỗi JSON Array hợp lệ');
+      throw new BadRequestException(
+        'Trường "products" phải là một chuỗi JSON Array hợp lệ',
+      );
     }
 
     return this.storesService.createProductsBulk(id, productsData, files);
   }
-
 
   @Get(':id/products')
   @ApiOperation({ summary: 'Lấy danh sách sản phẩm/nguyên liệu' })
@@ -2003,7 +2209,8 @@ export class StoresController {
   @Post(':id/payrolls/generate')
   @ApiOperation({
     summary: 'Tạo bảng lương tự động từ dữ liệu chấm công',
-    description: 'Aggregate ShiftAssignment, tính lương, áp dụng thưởng/phạt từ payroll rules',
+    description:
+      'Aggregate ShiftAssignment, tính lương, áp dụng thưởng/phạt từ payroll rules',
   })
   @ApiResponse({
     status: 201,
@@ -2021,7 +2228,8 @@ export class StoresController {
   @Post(':id/payrolls/recalculate')
   @ApiOperation({
     summary: 'Tính lại bảng lương từ dữ liệu chấm công',
-    description: 'Xóa bảng lương cũ và tính lại từ đầu dựa trên dữ liệu chấm công thực tế',
+    description:
+      'Xóa bảng lương cũ và tính lại từ đầu dựa trên dữ liệu chấm công thực tế',
   })
   @ApiResponse({
     status: 201,
@@ -2048,16 +2256,17 @@ export class StoresController {
   }
 
   @Get(':id/payrolls/by-month')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Lấy bảng lương theo tháng cụ thể',
-    description: 'Lấy bảng lương của cửa hàng theo tháng (format: YYYY-MM-DD, ngày bất kỳ trong tháng)'
+    description:
+      'Lấy bảng lương của cửa hàng theo tháng (format: YYYY-MM-DD, ngày bất kỳ trong tháng)',
   })
-  @ApiQuery({ 
-    name: 'date', 
-    required: true, 
+  @ApiQuery({
+    name: 'date',
+    required: true,
     type: String,
     description: 'Tháng cần lấy (YYYY-MM-DD)',
-    example: '2026-01-01'
+    example: '2026-01-01',
   })
   @ApiResponse({
     status: 200,
@@ -2070,11 +2279,16 @@ export class StoresController {
   })
   async getPayrollByMonth(
     @Param('id') id: string,
-    @Query('date') date: string
+    @Query('date') date: string,
   ) {
-    const payroll = await this.storesService.getPayrollByMonth(id, new Date(date));
+    const payroll = await this.storesService.getPayrollByMonth(
+      id,
+      new Date(date),
+    );
     if (!payroll) {
-      throw new NotFoundException(`Không tìm thấy bảng lương cho tháng ${date}`);
+      throw new NotFoundException(
+        `Không tìm thấy bảng lương cho tháng ${date}`,
+      );
     }
     return payroll;
   }
@@ -2092,7 +2306,9 @@ export class StoresController {
   }
 
   @Get(':id/payroll-payments')
-  @ApiOperation({ summary: 'Lấy danh sách lịch sử thanh toán lương của cửa hàng' })
+  @ApiOperation({
+    summary: 'Lấy danh sách lịch sử thanh toán lương của cửa hàng',
+  })
   @ApiResponse({ status: 200, type: [StorePayrollPaymentResponseDto] })
   async getPaymentHistories(@Param('id') id: string) {
     return this.storesService.getPaymentHistories(id);
@@ -2117,7 +2333,12 @@ export class StoresController {
 
   @Get(':id/payroll-summary')
   @ApiOperation({ summary: 'Lấy báo cáo tổng hợp lương theo tháng' })
-  @ApiQuery({ name: 'date', required: true, example: '11/2025', description: 'Tháng cần lấy báo cáo (MM/YYYY)' })
+  @ApiQuery({
+    name: 'date',
+    required: true,
+    example: '11/2025',
+    description: 'Tháng cần lấy báo cáo (MM/YYYY)',
+  })
   @ApiResponse({ status: 200, type: PayrollMonthlySummaryResponseDto })
   async getPayrollSummary(
     @Param('id') id: string,
@@ -2127,8 +2348,15 @@ export class StoresController {
   }
 
   @Get(':id/payroll-details')
-  @ApiOperation({ summary: 'Lấy danh sách chi tiết phạt, thưởng và tăng ca trong tháng' })
-  @ApiQuery({ name: 'date', required: true, example: '11/2025', description: 'Tháng cần lấy báo cáo (MM/YYYY)' })
+  @ApiOperation({
+    summary: 'Lấy danh sách chi tiết phạt, thưởng và tăng ca trong tháng',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: true,
+    example: '11/2025',
+    description: 'Tháng cần lấy báo cáo (MM/YYYY)',
+  })
   @ApiResponse({ status: 200, description: 'Danh sách chi tiết' })
   async getPayrollDetails(
     @Param('id') id: string,
@@ -2158,14 +2386,16 @@ export class StoresController {
     @Query('date') date: string,
     @Res() res: any,
   ) {
-    if (!id || !date) throw new BadRequestException('Vui lòng cung cấp storeId và date');
+    if (!id || !date)
+      throw new BadRequestException('Vui lòng cung cấp storeId và date');
     const buffer = await this.storesService.downloadPayrollReport(id, date);
-    
+
     let slugDate = date.replace('/', '-');
     const fileName = `Bao_Cao_Quy_Luong_${slugDate}.xlsx`;
 
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${fileName}"`,
     });
 
@@ -2174,15 +2404,18 @@ export class StoresController {
 
   @Get(':id/general-dashboard')
   @ApiOperation({ summary: 'Lấy báo cáo tổng hợp (General Dashboard)' })
-  @ApiQuery({ name: 'month', required: false, example: '01/2026', description: 'Tháng báo cáo (MM/YYYY)' })
+  @ApiQuery({
+    name: 'month',
+    required: false,
+    example: '01/2026',
+    description: 'Tháng báo cáo (MM/YYYY)',
+  })
   async getGeneralDashboard(
     @Param('id') id: string,
     @Query('month') month?: string,
   ) {
     return this.storesService.getGeneralDashboard(id, month);
   }
-
-
 
   @Get(':id/salary-fund/history')
   @ApiOperation({ summary: 'Lịch sử điều chỉnh quỹ lương của cửa hàng' })
@@ -2228,15 +2461,22 @@ export class StoresController {
   }
 
   @Get(':id/employee-salaries')
-  @ApiOperation({ summary: 'Lấy danh sách lương nhân viên của cửa hàng theo tháng' })
+  @ApiOperation({
+    summary: 'Lấy danh sách lương nhân viên của cửa hàng theo tháng',
+  })
   @ApiQuery({ name: 'month', required: true, example: '11/2025' })
-  @ApiQuery({ name: 'type', required: false, description: 'Lọc theo loại nhân viên (Full-time, Part-time...)' })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    description: 'Lọc theo loại nhân viên (Full-time, Part-time...)',
+  })
   async getEmployeeSalariesByStore(
     @Param('id') id: string,
     @Query('month') month: string,
     @Query('type') type?: string,
   ) {
-    if (!month) throw new BadRequestException('Vui lòng cung cấp tháng (month)');
+    if (!month)
+      throw new BadRequestException('Vui lòng cung cấp tháng (month)');
     return this.storesService.getEmployeeSalariesByStore(id, month, type);
   }
 
@@ -2258,12 +2498,17 @@ export class StoresController {
     description: 'Tạo thành công',
     type: SalaryConfigResponseDto,
   })
-  async createSalaryConfig(@GetUser() user: any, @Body() body: CreateSalaryConfigDto) {
+  async createSalaryConfig(
+    @GetUser() user: any,
+    @Body() body: CreateSalaryConfigDto,
+  ) {
     return this.storesService.createSalaryConfig(user.userId, body);
   }
 
   @Post(':id/salary-configs')
-  @ApiOperation({ summary: 'Tạo cấu hình lương cho cửa hàng cụ thể (URL có ID)' })
+  @ApiOperation({
+    summary: 'Tạo cấu hình lương cho cửa hàng cụ thể (URL có ID)',
+  })
   @ApiResponse({
     status: 201,
     description: 'Tạo thành công',
@@ -2293,7 +2538,7 @@ export class StoresController {
   ) {
     return this.storesService.updateSalaryConfig(configId, body);
   }
-  
+
   @Patch('salary-configs/:configId/status')
   @ApiOperation({ summary: 'Thay đổi trạng thái cấu hình lương' })
   @ApiResponse({
@@ -2302,12 +2547,11 @@ export class StoresController {
     type: SalaryConfigResponseDto,
   })
   async changeSalaryConfigStatus(
-      @Param('configId') configId: string,
-      @Body('status') status: ConfigStatus
+    @Param('configId') configId: string,
+    @Body('status') status: ConfigStatus,
   ) {
-      return this.storesService.changeSalaryConfigStatus(configId, status);
+    return this.storesService.changeSalaryConfigStatus(configId, status);
   }
-
 
   @Delete('salary-configs/:configId')
   @ApiOperation({ summary: 'Xóa cấu hình lương' })
@@ -2360,7 +2604,9 @@ export class StoresController {
 
   // Employee Salary Payment History
   @Get('employees/:profileId/salary-history')
-  @ApiOperation({ summary: 'Lấy lịch sử thanh toán lương của nhân viên (phân trang)' })
+  @ApiOperation({
+    summary: 'Lấy lịch sử thanh toán lương của nhân viên (phân trang)',
+  })
   @ApiQuery({ name: 'page', required: false, example: '1' })
   @ApiQuery({ name: 'limit', required: false, example: '10' })
   @ApiResponse({ status: 200, description: 'Danh sách lịch sử thanh toán' })
@@ -2382,7 +2628,12 @@ export class StoresController {
   @ApiResponse({ status: 201, description: 'Tạo yêu cầu thành công' })
   async createSalaryAdvanceRequest(
     @Param('profileId') profileId: string,
-    @Body() body: { employeeSalaryId: string; requestedAmount: number; requestReason?: string }
+    @Body()
+    body: {
+      employeeSalaryId: string;
+      requestedAmount: number;
+      requestReason?: string;
+    },
   ) {
     return this.storesService.createSalaryAdvanceRequest(profileId, body);
   }
@@ -2398,7 +2649,7 @@ export class StoresController {
     return this.storesService.getSalaryAdvanceRequests({
       storeId,
       status: status as any,
-      month: month ? new Date(month) : undefined
+      month: month ? new Date(month) : undefined,
     });
   }
 
@@ -2411,7 +2662,7 @@ export class StoresController {
   ) {
     return this.storesService.getSalaryAdvanceRequests({
       employeeProfileId: profileId,
-      status: status as any
+      status: status as any,
     });
   }
 
@@ -2421,15 +2672,20 @@ export class StoresController {
   async reviewSalaryAdvanceRequest(
     @Param('requestId') requestId: string,
     @GetUser() user: any,
-    @Body() body: {
+    @Body()
+    body: {
       status: string;
       approvedAmount?: number;
       reviewNote?: string;
       paymentMethod?: string;
       paymentReference?: string;
-    }
+    },
   ) {
-    return this.storesService.reviewSalaryAdvanceRequest(requestId, user.userId, body as any);
+    return this.storesService.reviewSalaryAdvanceRequest(
+      requestId,
+      user.userId,
+      body as any,
+    );
   }
 
   @Delete('salary-advance-requests/:requestId')
@@ -2444,7 +2700,10 @@ export class StoresController {
     if (!profile) {
       throw new NotFoundException('Không tìm thấy thông tin nhân viên');
     }
-    return this.storesService.cancelSalaryAdvanceRequest(requestId, profile.profile.id);
+    return this.storesService.cancelSalaryAdvanceRequest(
+      requestId,
+      profile.profile.id,
+    );
   }
 
   // KPI Types
@@ -2491,12 +2750,6 @@ export class StoresController {
     return this.storesService.getKpiPeriods(id);
   }
 
-
-
-
-
-
-
   // Daily Employee Reports
   @Post(':id/daily-reports')
   @ApiOperation({
@@ -2524,16 +2777,17 @@ export class StoresController {
   }
 
   @Get(':id/daily-reports/by-date')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Lấy báo cáo ngày theo ngày cụ thể',
-    description: 'Lấy báo cáo nhân viên hàng ngày của cửa hàng theo ngày cụ thể (format: YYYY-MM-DD)'
+    description:
+      'Lấy báo cáo nhân viên hàng ngày của cửa hàng theo ngày cụ thể (format: YYYY-MM-DD)',
   })
-  @ApiQuery({ 
-    name: 'date', 
-    required: true, 
+  @ApiQuery({
+    name: 'date',
+    required: true,
     type: String,
     description: 'Ngày cần lấy báo cáo (YYYY-MM-DD)',
-    example: '2026-01-22'
+    example: '2026-01-22',
   })
   @ApiResponse({
     status: 200,
@@ -2546,9 +2800,12 @@ export class StoresController {
   })
   async getDailyReportByDate(
     @Param('id') id: string,
-    @Query('date') date: string
+    @Query('date') date: string,
   ) {
-    const report = await this.storesService.getDailyReportByDate(id, new Date(date));
+    const report = await this.storesService.getDailyReportByDate(
+      id,
+      new Date(date),
+    );
     if (!report) {
       throw new NotFoundException(`Không tìm thấy báo cáo cho ngày ${date}`);
     }
@@ -2602,10 +2859,13 @@ export class StoresController {
     return this.storesService.createEvent(id, body);
   }
 
-
   @Get(':id/events')
   @ApiOperation({ summary: 'Lấy danh sách sự kiện' })
-  @ApiQuery({ name: 'timeRange', required: false, enum: ['today', 'yesterday', '1_week', '1_month'] })
+  @ApiQuery({
+    name: 'timeRange',
+    required: false,
+    enum: ['today', 'yesterday', '1_week', '1_month'],
+  })
   @ApiQuery({ name: 'type', required: false, enum: StoreEventType })
   @ApiResponse({
     status: 200,
@@ -2669,7 +2929,9 @@ export class StoresController {
   @Post('inventory-reports')
   @UseInterceptors(AnyFilesInterceptor(multerConfig))
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Gửi báo cáo sự cố kho (Hỗ trợ nhiều báo cáo & nhiều ảnh)' })
+  @ApiOperation({
+    summary: 'Gửi báo cáo sự cố kho (Hỗ trợ nhiều báo cáo & nhiều ảnh)',
+  })
   async createInventoryReports(
     @Body('reports') reportsStr: string,
     @UploadedFiles() files: Express.Multer.File[],
@@ -2678,7 +2940,9 @@ export class StoresController {
     try {
       reports = JSON.parse(reportsStr);
     } catch (e) {
-      throw new BadRequestException('Trường "reports" phải là một chuỗi JSON hợp lệ');
+      throw new BadRequestException(
+        'Trường "reports" phải là một chuỗi JSON hợp lệ',
+      );
     }
 
     return this.storesService.createInventoryReports(reports, files);
@@ -2739,7 +3003,10 @@ export class StoresController {
   @Post(':id/fnb-items')
   @UseInterceptors(FileInterceptor('avatar', multerConfig))
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Tạo món F&B kèm danh mục và công thức (Tự động tạo danh mục nếu chưa có)' })
+  @ApiOperation({
+    summary:
+      'Tạo món F&B kèm danh mục và công thức (Tự động tạo danh mục nếu chưa có)',
+  })
   async createFnbItem(
     @Param('id') id: string,
     @Body() body: CreateFnbServiceItemDto,
@@ -2753,13 +3020,14 @@ export class StoresController {
       try {
         data.recipes = JSON.parse(data.recipes);
       } catch (e) {
-        throw new BadRequestException('Trường "recipes" phải là một chuỗi JSON Array hợp lệ');
+        throw new BadRequestException(
+          'Trường "recipes" phải là một chuỗi JSON Array hợp lệ',
+        );
       }
     }
 
     return this.storesService.createFnbServiceItem(id, data);
   }
-
 
   @Post(':id/service-items')
   @UseInterceptors(FileInterceptor('avatar', multerConfig))
@@ -2878,8 +3146,6 @@ export class StoresController {
     return this.storesService.getOrders(id, query);
   }
 
-
-
   @Get(':id/revenue-report')
   @ApiOperation({
     summary: 'Báo cáo doanh thu & lợi nhuận',
@@ -2922,7 +3188,9 @@ export class StoresController {
     @Query('endDate') endDate: string,
   ) {
     const end = endDate ? new Date(endDate) : new Date();
-    const start = startDate ? new Date(startDate) : new Date(new Date().setDate(end.getDate() - 30));
+    const start = startDate
+      ? new Date(startDate)
+      : new Date(new Date().setDate(end.getDate() - 30));
     return this.storesService.getTopEmployeesReport(id, start, end);
   }
 
@@ -2938,7 +3206,9 @@ export class StoresController {
     @Query('endDate') endDate: string,
   ) {
     const end = endDate ? new Date(endDate) : new Date();
-    const start = startDate ? new Date(startDate) : new Date(new Date().setDate(end.getDate() - 30));
+    const start = startDate
+      ? new Date(startDate)
+      : new Date(new Date().setDate(end.getDate() - 30));
     return this.storesService.getShiftEfficiencyReport(id, start, end);
   }
 
@@ -2954,17 +3224,24 @@ export class StoresController {
     @Query('endDate') endDate: string,
   ) {
     const end = endDate ? new Date(endDate) : new Date();
-    const start = startDate ? new Date(startDate) : new Date(new Date().setDate(end.getDate() - 30));
+    const start = startDate
+      ? new Date(startDate)
+      : new Date(new Date().setDate(end.getDate() - 30));
     return this.storesService.getLosingMoneyReport(id, start, end);
   }
 
   @Get(':id/order-statistics')
   @ApiOperation({
     summary: 'Thống kê đơn hàng theo kỳ (Dashboard)',
-    description: 'Lấy thống kê đơn hàng theo tuần/tháng/năm kèm so sánh với kỳ trước',
+    description:
+      'Lấy thống kê đơn hàng theo tuần/tháng/năm kèm so sánh với kỳ trước',
   })
   @ApiQuery({ name: 'period', required: true, enum: ['week', 'month', 'year'] })
-  @ApiQuery({ name: 'date', required: false, description: 'Ngày tham chiếu (YYYY-MM-DD)' })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    description: 'Ngày tham chiếu (YYYY-MM-DD)',
+  })
   async getOrderStatistics(
     @Param('id') id: string,
     @Query('period') period: 'week' | 'month' | 'year',
@@ -2978,15 +3255,25 @@ export class StoresController {
     summary: 'Báo cáo chi phí',
     description: 'Lấy chi phí vật tư, nhân sự và so sánh với doanh thu',
   })
-  @ApiQuery({ name: 'startDate', required: false, description: 'Ngày bắt đầu (YYYY-MM-DD)' })
-  @ApiQuery({ name: 'endDate', required: false, description: 'Ngày kết thúc (YYYY-MM-DD)' })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    description: 'Ngày bắt đầu (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    description: 'Ngày kết thúc (YYYY-MM-DD)',
+  })
   async getExpenseReport(
     @Param('id') id: string,
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
   ) {
     const end = endDate ? new Date(endDate) : new Date();
-    const start = startDate ? new Date(startDate) : new Date(new Date().setDate(end.getDate() - 30));
+    const start = startDate
+      ? new Date(startDate)
+      : new Date(new Date().setDate(end.getDate() - 30));
     return this.storesService.getExpenseReport(id, start, end);
   }
 
@@ -3011,12 +3298,17 @@ export class StoresController {
     status: 200,
     type: [SalaryAdjustmentResponseDto],
   })
-  async getSalaryAdjustments(@Param('employeeProfileId') employeeProfileId: string) {
+  async getSalaryAdjustments(
+    @Param('employeeProfileId') employeeProfileId: string,
+  ) {
     return this.storesService.getSalaryAdjustments(employeeProfileId);
   }
 
   @Get(':id/employees-salary-overview')
-  @ApiOperation({ summary: 'Lấy danh sách tổng hợp lương và điều chỉnh của nhân viên trong store' })
+  @ApiOperation({
+    summary:
+      'Lấy danh sách tổng hợp lương và điều chỉnh của nhân viên trong store',
+  })
   @ApiResponse({
     status: 200,
     description: 'Lấy dữ liệu thành công',
@@ -3026,12 +3318,16 @@ export class StoresController {
   }
 
   @Get('employees/:employeeProfileId/salary-overview')
-  @ApiOperation({ summary: 'Lấy tổng hợp lương và điều chỉnh của MỘT nhân viên' })
+  @ApiOperation({
+    summary: 'Lấy tổng hợp lương và điều chỉnh của MỘT nhân viên',
+  })
   @ApiResponse({
     status: 200,
     description: 'Lấy dữ liệu thành công',
   })
-  async getEmployeeSalaryOverview(@Param('employeeProfileId') employeeProfileId: string) {
+  async getEmployeeSalaryOverview(
+    @Param('employeeProfileId') employeeProfileId: string,
+  ) {
     return this.storesService.getEmployeeSalaryOverview(employeeProfileId);
   }
 
@@ -3041,23 +3337,35 @@ export class StoresController {
     @Param('employeeProfileId') employeeProfileId: string,
     @Query('month') month: string,
   ) {
-    return this.storesService.getEmployeeSalaryDetailByMonth(employeeProfileId, month);
+    return this.storesService.getEmployeeSalaryDetailByMonth(
+      employeeProfileId,
+      month,
+    );
   }
 
   @Post('salaries/:id/pay')
   @ApiOperation({ summary: 'Thực hiện thanh toán lương cho nhân viên' })
   async payEmployeeSalary(
     @Param('id') id: string,
-    @Body() body: { paymentAccountId: string, paymentMethod?: string, referenceNumber?: string, notes?: string }
+    @Body()
+    body: {
+      paymentAccountId: string;
+      paymentMethod?: string;
+      referenceNumber?: string;
+      notes?: string;
+    },
   ) {
     return this.storesService.payEmployeeSalary(id, body);
   }
 
   @Patch('employees/:id/salary-structure')
-  @ApiOperation({ summary: 'Cập nhật mức lương và các khoản phụ cấp của nhân viên' })
+  @ApiOperation({
+    summary: 'Cập nhật mức lương và các khoản phụ cấp của nhân viên',
+  })
   async updateEmployeeSalaryStructure(
     @Param('id') id: string,
-    @Body() body: { salaryAmount?: number; allowances?: Record<string, number> }
+    @Body()
+    body: { salaryAmount?: number; allowances?: Record<string, number> },
   ) {
     return this.storesService.updateEmployeeSalaryStructure(id, body);
   }
@@ -3065,7 +3373,9 @@ export class StoresController {
   // Employee Payment History (Individual)
   @Get('employees/:employeeProfileId/payment-histories')
   @ApiOperation({ summary: 'Lấy lịch sử thanh toán lương của MỘT nhân viên' })
-  async getEmployeePaymentHistories(@Param('employeeProfileId') employeeProfileId: string) {
+  async getEmployeePaymentHistories(
+    @Param('employeeProfileId') employeeProfileId: string,
+  ) {
     return this.storesService.getEmployeePaymentHistories(employeeProfileId);
   }
 
@@ -3077,7 +3387,10 @@ export class StoresController {
 
   @Patch('employees/payment-histories/:id')
   @ApiOperation({ summary: 'Cập nhật bản ghi thanh toán lương' })
-  async updateEmployeePaymentHistory(@Param('id') id: string, @Body() body: any) {
+  async updateEmployeePaymentHistory(
+    @Param('id') id: string,
+    @Body() body: any,
+  ) {
     return this.storesService.updateEmployeePaymentHistory(id, body);
   }
 
@@ -3097,7 +3410,10 @@ export class StoresController {
   @Post(':id/payment-accounts')
   @ApiOperation({ summary: 'Thêm tài khoản ngân hàng mới cho cửa hàng' })
   async createStorePaymentAccount(@Param('id') id: string, @Body() body: any) {
-    return this.storesService.createStorePaymentAccount({ ...body, storeId: id });
+    return this.storesService.createStorePaymentAccount({
+      ...body,
+      storeId: id,
+    });
   }
 
   @Patch('payment-accounts/:id')
@@ -3157,7 +3473,11 @@ export class StoresController {
     @Query('employeeProfileId') employeeProfileId: string,
     @Query('date') date?: string,
   ) {
-    return this.storesService.getEmployeeDailyReport(storeId, employeeProfileId, date);
+    return this.storesService.getEmployeeDailyReport(
+      storeId,
+      employeeProfileId,
+      date,
+    );
   }
 
   @Get(':id/employee-monthly-report')
@@ -3169,7 +3489,11 @@ export class StoresController {
     @Query('employeeProfileId') employeeProfileId: string,
     @Query('month') month?: string,
   ) {
-    return this.storesService.getEmployeeMonthlyReport(storeId, employeeProfileId, month);
+    return this.storesService.getEmployeeMonthlyReport(
+      storeId,
+      employeeProfileId,
+      month,
+    );
   }
 
   @Get(':id/employee-shift-hours')
@@ -3183,7 +3507,12 @@ export class StoresController {
     @Query('month') month?: string,
     @Query('filter') filter?: string,
   ) {
-    return this.storesService.getEmployeeShiftHours(storeId, employeeProfileId, month, filter);
+    return this.storesService.getEmployeeShiftHours(
+      storeId,
+      employeeProfileId,
+      month,
+      filter,
+    );
   }
 
   // Leave Requests (Staff)
@@ -3196,7 +3525,10 @@ export class StoresController {
     @Body() body: any,
     @UploadedFiles() files: Express.Multer.File[],
   ) {
-    return this.storesService.createLeaveRequest({ ...body, storeId: id }, files);
+    return this.storesService.createLeaveRequest(
+      { ...body, storeId: id },
+      files,
+    );
   }
 
   @Get(':id/leave-requests')
@@ -3288,7 +3620,8 @@ export class StoresController {
     // multerConfig uses diskStorage → file.buffer is undefined, read from file.path
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const fsLib = require('fs');
-    const imageBuffer = photo.buffer || (photo.path ? fsLib.readFileSync(photo.path) : null);
+    const imageBuffer =
+      photo.buffer || (photo.path ? fsLib.readFileSync(photo.path) : null);
     if (!imageBuffer) throw new BadRequestException('Invalid photo upload');
     const result = await this.storesService.checkInWithFace(id, imageBuffer, {
       latitude: body.latitude ? parseFloat(body.latitude) : undefined,
@@ -3296,7 +3629,12 @@ export class StoresController {
       qrStoreId: body.qrStoreId,
     });
     // Clean up temp file
-    if (photo.path) try { fsLib.unlinkSync(photo.path); } catch (_e) { /* ignore */ }
+    if (photo.path)
+      try {
+        fsLib.unlinkSync(photo.path);
+      } catch (_e) {
+        /* ignore */
+      }
     return result;
   }
 
@@ -3312,7 +3650,8 @@ export class StoresController {
     // multerConfig uses diskStorage → file.buffer is undefined, read from file.path
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const fsLib = require('fs');
-    const imageBuffer = photo.buffer || (photo.path ? fsLib.readFileSync(photo.path) : null);
+    const imageBuffer =
+      photo.buffer || (photo.path ? fsLib.readFileSync(photo.path) : null);
     if (!imageBuffer) throw new BadRequestException('Invalid photo upload');
     const result = await this.storesService.checkOutWithFace(id, imageBuffer, {
       latitude: body.latitude ? parseFloat(body.latitude) : undefined,
@@ -3320,20 +3659,30 @@ export class StoresController {
       qrStoreId: body.qrStoreId,
     });
     // Clean up temp file
-    if (photo.path) try { fsLib.unlinkSync(photo.path); } catch (_e) { /* ignore */ }
+    if (photo.path)
+      try {
+        fsLib.unlinkSync(photo.path);
+      } catch (_e) {
+        /* ignore */
+      }
     return result;
   }
 
   @Put(':id/location')
   @ApiOperation({
     summary: 'Cập nhật vị trí cửa hàng',
-    description: 'Chủ cửa hàng chọn vị trí trên bản đồ. Tự động tạo QR code nếu chưa có.',
+    description:
+      'Chủ cửa hàng chọn vị trí trên bản đồ. Tự động tạo QR code nếu chưa có.',
   })
   async updateStoreLocation(
     @Param('id') id: string,
     @Body() body: { latitude: number; longitude: number },
   ) {
-    return this.storesService.updateStoreLocation(id, body.latitude, body.longitude);
+    return this.storesService.updateStoreLocation(
+      id,
+      body.latitude,
+      body.longitude,
+    );
   }
 
   @Post(':id/qr-code')
@@ -3341,7 +3690,6 @@ export class StoresController {
   async generateStoreQR(@Param('id') id: string) {
     return this.storesService.generateStoreQR(id);
   }
-
 
   @Post('employees/:employeeId/face-registration')
   @ApiOperation({ summary: 'Đăng ký khuôn mặt nhân viên (Face ID style)' })
@@ -3362,19 +3710,26 @@ export class StoresController {
       if (p.path) return fsLib.readFileSync(p.path);
       throw new BadRequestException('Invalid file upload');
     });
-    const result = await this.storesService.registerFace(employeeId, storeId, buffers);
+    const result = await this.storesService.registerFace(
+      employeeId,
+      storeId,
+      buffers,
+    );
     // Clean up temp files
     photos.forEach((p) => {
-      if (p.path) try { fsLib.unlinkSync(p.path); } catch (_e) { /* ignore cleanup errors */ }
+      if (p.path)
+        try {
+          fsLib.unlinkSync(p.path);
+        } catch (_e) {
+          /* ignore cleanup errors */
+        }
     });
     return result;
   }
 
   @Get('employees/:employeeId/face-registration')
   @ApiOperation({ summary: 'Kiểm tra trạng thái đăng ký khuôn mặt' })
-  async getFaceRegistration(
-    @Param('employeeId') employeeId: string,
-  ) {
+  async getFaceRegistration(@Param('employeeId') employeeId: string) {
     return this.storesService.getFaceRegistration(employeeId);
   }
 
@@ -3386,7 +3741,11 @@ export class StoresController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
   ) {
-    return this.storesService.getAttendanceLogs(id, { employeeProfileId, dateFrom, dateTo });
+    return this.storesService.getAttendanceLogs(id, {
+      employeeProfileId,
+      dateFrom,
+      dateTo,
+    });
   }
 
   @Get(':id/bonus-history')
@@ -3408,7 +3767,9 @@ export class StoresController {
   }
 
   @Get('employees/:employeeId/next-shift-assignment')
-  @ApiOperation({ summary: 'Lấy ca tiếp theo hoặc ca đang active của nhân viên' })
+  @ApiOperation({
+    summary: 'Lấy ca tiếp theo hoặc ca đang active của nhân viên',
+  })
   async getNextShiftAssignment(
     @Param('employeeId') employeeId: string,
     @Query('storeId') storeId: string,
@@ -3423,12 +3784,14 @@ export class StoresController {
   @Post('shift-registrations')
   @ApiOperation({
     summary: 'Nhân viên gửi đề xuất đăng ký ca làm việc',
-    description: 'Nhân viên chọn ca và gửi yêu cầu để quản lý phê duyệt. Tạo một ShiftAssignment với status PENDING.',
+    description:
+      'Nhân viên chọn ca và gửi yêu cầu để quản lý phê duyệt. Tạo một ShiftAssignment với status PENDING.',
   })
   @ApiResponse({ status: 201, description: 'Yêu cầu đăng ký ca đã được gửi' })
   async createShiftRegistration(
     @GetUser() user: any,
-    @Body() body: {
+    @Body()
+    body: {
       storeId: string;
       employeeProfileId: string;
       workShiftId?: string;
@@ -3451,7 +3814,11 @@ export class StoresController {
     @Query('employeeProfileId') employeeProfileId?: string,
     @Query('status') status?: string,
   ) {
-    return this.storesService.getShiftRegistrations({ storeId, employeeProfileId, status });
+    return this.storesService.getShiftRegistrations({
+      storeId,
+      employeeProfileId,
+      status,
+    });
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3461,7 +3828,8 @@ export class StoresController {
   @Post('employees/:profileId/salary-inquiries')
   @ApiOperation({
     summary: 'Gửi câu hỏi về lương tới quản lý',
-    description: 'Nhân viên đặt câu hỏi liên quan đến lương thưởng. Câu hỏi được lưu và thông báo tới quản lý.',
+    description:
+      'Nhân viên đặt câu hỏi liên quan đến lương thưởng. Câu hỏi được lưu và thông báo tới quản lý.',
   })
   @ApiResponse({ status: 201, description: 'Câu hỏi đã được gửi thành công' })
   async createSalaryInquiry(
@@ -3469,7 +3837,11 @@ export class StoresController {
     @GetUser() user: any,
     @Body() body: { question: string; month?: string },
   ) {
-    return this.storesService.createSalaryInquiry(profileId, body.question, body.month);
+    return this.storesService.createSalaryInquiry(
+      profileId,
+      body.question,
+      body.month,
+    );
   }
 
   @Get('employees/:profileId/salary-inquiries')
@@ -3485,7 +3857,8 @@ export class StoresController {
   @Post('employees/:profileId/salary-slips')
   @ApiOperation({
     summary: 'Yêu cầu xuất phiếu lương',
-    description: 'Lấy dữ liệu phiếu lương của nhân viên cho tháng được chỉ định. Trả về dữ liệu lương chi tiết.',
+    description:
+      'Lấy dữ liệu phiếu lương của nhân viên cho tháng được chỉ định. Trả về dữ liệu lương chi tiết.',
   })
   @ApiResponse({ status: 200, description: 'Dữ liệu phiếu lương' })
   async createSalarySlip(
@@ -3502,12 +3875,17 @@ export class StoresController {
   @Post('kpi-ai-suggestions')
   @ApiOperation({
     summary: 'Gửi yêu cầu AI đề xuất KPI',
-    description: 'AI phân tích lịch sử hiệu suất của nhân viên và đề xuất các mục tiêu KPI phù hợp.',
+    description:
+      'AI phân tích lịch sử hiệu suất của nhân viên và đề xuất các mục tiêu KPI phù hợp.',
   })
-  @ApiResponse({ status: 201, description: 'Yêu cầu đã được tiếp nhận, AI đang xử lý' })
+  @ApiResponse({
+    status: 201,
+    description: 'Yêu cầu đã được tiếp nhận, AI đang xử lý',
+  })
   async requestKpiAiSuggestion(
     @GetUser() user: any,
-    @Body() body: {
+    @Body()
+    body: {
       storeId: string;
       employeeProfileId: string;
       context?: string;
@@ -3524,7 +3902,8 @@ export class StoresController {
   @ApiOperation({ summary: 'Gửi yêu cầu đổi ca' })
   @ApiResponse({ status: 201, description: 'Yêu cầu đổi ca đã được gửi' })
   async createShiftChangeRequest(
-    @Body() body: {
+    @Body()
+    body: {
       storeId: string;
       employeeProfileId: string;
       currentShiftId?: string;
@@ -3548,7 +3927,9 @@ export class StoresController {
     @Query('status') status?: string,
   ) {
     if (employeeProfileId) {
-      return this.storesService.getShiftChangeRequestsByEmployee(employeeProfileId);
+      return this.storesService.getShiftChangeRequestsByEmployee(
+        employeeProfileId,
+      );
     }
     if (storeId) {
       return this.storesService.getShiftChangeRequestsByStore(
@@ -3577,7 +3958,11 @@ export class StoresController {
     @Body() body: { reason?: string },
   ) {
     const profile = await this.storesService.getEmployeeByAccountId(user.id);
-    return this.storesService.rejectShiftChangeRequest(id, profile?.id, body.reason);
+    return this.storesService.rejectShiftChangeRequest(
+      id,
+      profile?.id,
+      body.reason,
+    );
   }
 
   @Patch('shift-change-requests/:id/cancel')
@@ -3598,7 +3983,8 @@ export class StoresController {
   @ApiOperation({ summary: 'Gửi yêu cầu bổ sung công' })
   @ApiResponse({ status: 201, description: 'Yêu cầu bổ sung công đã được gửi' })
   async createBonusWorkRequest(
-    @Body() body: {
+    @Body()
+    body: {
       storeId: string;
       employeeProfileId: string;
       shiftSlotId?: string | null;
@@ -3623,7 +4009,9 @@ export class StoresController {
     @Query('status') status?: string,
   ) {
     if (employeeProfileId) {
-      return this.storesService.getBonusWorkRequestsByEmployee(employeeProfileId);
+      return this.storesService.getBonusWorkRequestsByEmployee(
+        employeeProfileId,
+      );
     }
     if (storeId) {
       return this.storesService.getBonusWorkRequestsByStore(
@@ -3636,10 +4024,7 @@ export class StoresController {
 
   @Patch('bonus-work-requests/:id/approve')
   @ApiOperation({ summary: 'Phê duyệt yêu cầu bổ sung công' })
-  async approveBonusWorkRequest(
-    @Param('id') id: string,
-    @GetUser() user: any,
-  ) {
+  async approveBonusWorkRequest(@Param('id') id: string, @GetUser() user: any) {
     const profile = await this.storesService.getEmployeeByAccountId(user.id);
     return this.storesService.approveBonusWorkRequest(id, profile?.id);
   }
@@ -3652,17 +4037,17 @@ export class StoresController {
     @Body() body: { reason?: string },
   ) {
     const profile = await this.storesService.getEmployeeByAccountId(user.id);
-    return this.storesService.rejectBonusWorkRequest(id, profile?.id, body.reason);
+    return this.storesService.rejectBonusWorkRequest(
+      id,
+      profile?.id,
+      body.reason,
+    );
   }
 
   @Patch('bonus-work-requests/:id/cancel')
   @ApiOperation({ summary: 'Hủy yêu cầu bổ sung công' })
-  async cancelBonusWorkRequest(
-    @Param('id') id: string,
-    @GetUser() user: any,
-  ) {
+  async cancelBonusWorkRequest(@Param('id') id: string, @GetUser() user: any) {
     const profile = await this.storesService.getEmployeeByAccountId(user.id);
     return this.storesService.cancelBonusWorkRequest(id, profile?.id);
   }
 }
-

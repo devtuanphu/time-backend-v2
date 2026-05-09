@@ -46,6 +46,7 @@ import {
   EmployeeContract,
   PaymentType,
 } from './entities/employee-contract.entity';
+import { ContractTemplate } from './entities/contract-template.entity';
 import { WorkShift } from './entities/work-shift.entity';
 import { Asset } from './entities/asset.entity';
 import { Product } from './entities/product.entity';
@@ -223,6 +224,8 @@ export class StoresService {
     private readonly profileRoleRepository: Repository<EmployeeProfileRole>,
     @InjectRepository(EmployeeContract)
     private readonly contractRepository: Repository<EmployeeContract>,
+    @InjectRepository(ContractTemplate)
+    private readonly contractTemplateRepository: Repository<ContractTemplate>,
     @InjectRepository(WorkShift)
     private readonly workShiftRepository: Repository<WorkShift>,
     @InjectRepository(Asset)
@@ -2287,6 +2290,76 @@ export class StoresService {
       where: { employeeProfileId: profileId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  // Contract Template management
+  async getContractTemplates(storeId: string) {
+    return this.contractTemplateRepository.find({
+      where: { storeId, isActive: true },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async getContractTemplate(id: string) {
+    const template = await this.contractTemplateRepository.findOne({
+      where: { id },
+    });
+    if (!template) {
+      throw new NotFoundException('Khong tim thay mau hop dong');
+    }
+    return template;
+  }
+
+  async createContractTemplate(storeId: string, data: any) {
+    // If this is set as default, unset other defaults in the same store
+    if (data.isDefault) {
+      await this.contractTemplateRepository.update(
+        { storeId, isDefault: true, isActive: true },
+        { isDefault: false },
+      );
+    }
+
+    const template = this.contractTemplateRepository.create({
+      ...data,
+      storeId,
+    });
+    return this.contractTemplateRepository.save(template);
+  }
+
+  async updateContractTemplate(id: string, data: any) {
+    const template = await this.contractTemplateRepository.findOne({
+      where: { id },
+    });
+    if (!template) {
+      throw new NotFoundException('Khong tim thay mau hop dong');
+    }
+
+    // If setting as default, unset other defaults in the same store
+    if (data.isDefault) {
+      await this.contractTemplateRepository.update(
+        {
+          storeId: template.storeId,
+          isDefault: true,
+          isActive: true,
+          id: Not(id),
+        },
+        { isDefault: false },
+      );
+    }
+
+    Object.assign(template, data);
+    return this.contractTemplateRepository.save(template);
+  }
+
+  async deleteContractTemplate(id: string) {
+    const template = await this.contractTemplateRepository.findOne({
+      where: { id },
+    });
+    if (!template) {
+      throw new NotFoundException('Khong tim thay mau hop dong');
+    }
+    template.isActive = false;
+    return this.contractTemplateRepository.save(template);
   }
 
   // Work Shift management
