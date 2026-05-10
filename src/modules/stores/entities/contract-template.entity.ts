@@ -39,6 +39,10 @@ export class ContractTemplate extends BaseEntity {
   @Column({ name: 'file_type', nullable: true })
   fileType: string;
 
+  /** HTML content từ rich text editor (Quill) */
+  @Column({ name: 'content_html', type: 'text', nullable: true })
+  contentHtml: string;
+
   /**
    * Danh sách placeholder fields.
    * VD: [{ key: "salary", label: "Lương", type: "currency" }, ...]

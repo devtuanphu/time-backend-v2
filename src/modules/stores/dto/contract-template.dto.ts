@@ -109,6 +109,15 @@ export class CreateContractTemplateDto {
   fileType?: string;
 
   @ApiProperty({
+    example: '<p>Hợp đồng lao động ...</p>',
+    description: 'HTML content từ rich text editor',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  contentHtml?: string;
+
+  @ApiProperty({
     type: [TemplateFieldDto],
     description: 'Danh sách placeholder fields cần fill khi tạo hợp đồng',
     required: false,
@@ -145,6 +154,9 @@ export class ContractTemplateResponseDto {
 
   @ApiProperty({ required: false })
   fileType: string;
+
+  @ApiProperty({ required: false })
+  contentHtml: string;
 
   @ApiProperty({ type: [TemplateFieldDto], required: false })
   fields: TemplateFieldDto[];

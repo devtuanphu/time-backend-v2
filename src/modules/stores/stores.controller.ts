@@ -1547,6 +1547,30 @@ export class StoresController {
     return this.storesService.deleteContractTemplate(templateId);
   }
 
+  @Post('contract-templates/upload')
+  @UseInterceptors(FileInterceptor('file', multerConfig))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Upload file mẫu hợp đồng',
+    description: 'Upload file PDF hoặc DOCX làm mẫu hợp đồng. Trả về URL file.',
+  })
+  @ApiResponse({ status: 201, description: 'Upload thành công' })
+  async uploadContractTemplateFile(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+    return {
+      fileUrl: `/uploads/${file.filename}`,
+      fileType: file.originalname.endsWith('.pdf')
+        ? 'pdf'
+        : file.originalname.endsWith('.docx')
+          ? 'docx'
+          : 'unknown',
+      originalName: file.originalname,
+      size: file.size,
+    };
+  }
+
   // Work Shifts
   @Post(':id/work-shifts')
   @ApiOperation({
