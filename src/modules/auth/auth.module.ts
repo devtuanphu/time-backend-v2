@@ -10,6 +10,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { MailModule } from '../mail/mail.module';
 import { ZaloModule } from '../zalo/zalo.module';
 import { EmployeeProfile } from '../stores/entities/employee-profile.entity';
+import { AccountRefreshToken } from '../accounts/entities/account-refresh-token.entity';
 import { StoresModule } from '../stores/stores.module';
 
 @Module({
@@ -19,7 +20,7 @@ import { StoresModule } from '../stores/stores.module';
     ZaloModule,
     StoresModule,
     PassportModule,
-    TypeOrmModule.forFeature([EmployeeProfile]),
+    TypeOrmModule.forFeature([EmployeeProfile, AccountRefreshToken]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

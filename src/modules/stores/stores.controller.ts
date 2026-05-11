@@ -18,6 +18,8 @@ import {
   Res,
   BadRequestException,
 } from '@nestjs/common';
+import { Request, Response } from 'express';
+import * as path from 'path';
 import {
   ApiTags,
   ApiOperation,
@@ -1569,6 +1571,22 @@ export class StoresController {
       originalName: file.originalname,
       size: file.size,
     };
+  }
+
+  @Post('contract-templates/extract-placeholders')
+  @ApiOperation({
+    summary: 'Trích xuất placeholder từ file DOCX',
+    description:
+      'Đọc file DOCX đã upload và trích xuất danh sách {{placeholder}}',
+  })
+  @ApiResponse({ status: 200, description: 'Danh sách placeholder' })
+  async extractPlaceholdersFromFile(@Body() body: { fileUrl: string }) {
+    if (!body.fileUrl) {
+      throw new BadRequestException('fileUrl is required');
+    }
+    const filename = body.fileUrl.replace('/uploads/', '');
+    const filePath = path.join(process.cwd(), 'uploads', filename);
+    return this.storesService.extractPlaceholdersFromDocx(filePath);
   }
 
   // Work Shifts

@@ -2362,6 +2362,24 @@ export class StoresService {
     return this.contractTemplateRepository.save(template);
   }
 
+  async extractPlaceholdersFromDocx(
+    filePath: string,
+  ): Promise<{ placeholders: string[]; textPreview: string }> {
+    try {
+      const { extractPlaceholdersFromDocx: extract } =
+        await import('../../common/utils/docx-parser');
+      const placeholders = extract(filePath);
+      const { extractTextFromDocx } =
+        await import('../../common/utils/docx-parser');
+      const textPreview = extractTextFromDocx(filePath).substring(0, 500);
+      return { placeholders, textPreview };
+    } catch (error) {
+      throw new BadRequestException(
+        `Cannot extract placeholders from DOCX: ${(error as Error).message}`,
+      );
+    }
+  }
+
   // Work Shift management
   async createWorkShift(storeId: string, data: Partial<WorkShift>) {
     // Bug 1.1 fix: Validate duplicate shift name
