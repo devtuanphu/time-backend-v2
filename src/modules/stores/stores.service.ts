@@ -14,6 +14,7 @@ import {
   IsNull,
   DataSource,
 } from 'typeorm';
+import { isUUID } from 'class-validator';
 import * as QRCode from 'qrcode';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -12309,7 +12310,14 @@ export class StoresService {
     const where: any = {};
     // NOTE: ShiftAssignment entity has no storeId column (FK is through shiftSlot)
     // Only filter by employeeId and status directly
-    if (filters.employeeProfileId) where.employeeId = filters.employeeProfileId;
+    if (filters.employeeProfileId) {
+      if (!isUUID(filters.employeeProfileId)) {
+        throw new BadRequestException(
+          `employeeProfileId phải là UUID hợp lệ, nhận được: "${filters.employeeProfileId}"`,
+        );
+      }
+      where.employeeId = filters.employeeProfileId;
+    }
     if (filters.status) where.status = filters.status;
 
     return this.shiftAssignmentRepository.find({
